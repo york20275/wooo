@@ -9,7 +9,7 @@ export const GROUPS = ['news', 'game', 'mixed', 'fun'] as const;
 /** 每分鐘最多發幾則（避免超過 Workers 單次執行的限制，也避免瞬間洗版） */
 const MAX_POSTS_PER_TICK = 10;
 
-interface Account { id: string; name: string; handle: string; content_group: string; persona: string; next_post_at: number | null }
+interface Account { id: string; name: string; handle: string; content_group: string; persona: string }
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 function twNow() {
@@ -23,8 +23,8 @@ function siteOf(url: string, fallback: string) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
 }
 const pick = <T>(a: T[]) => a[Math.floor(Math.random() * a.length)];
-/** 下一次發文時間：平均間隔的 0.5～1.5 倍，讓發文時間自然分散 */
-const nextTime = (intervalMin: number) => now() + Math.round(intervalMin * 60_000 * (0.5 + Math.random()));
+/** 依機率取整數：rate = 2.3 → 2 或 3（平均 2.3） */
+const randRound = (rate: number) => Math.floor(rate) + (Math.random() < rate % 1 ? 1 : 0);
 
 async function writePost(env: Env, model: string, a: Account, news: NewsItem | null): Promise<string | null> {
   const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。`;
@@ -54,19 +54,18 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
   ]);
 }
 
-async function postOne(env: Env, model: string, a: Account, intervalMin: number): Promise<string | null> {
+async function postOne(env: Env, model: string, a: Account): Promise<string | null> {
+  // 不論成功與否都排到隊伍最後面，下一則換別人（輪流）
+  const toBack = env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(now(), a.id);
   let news: NewsItem | null = null;
   if (a.content_group === 'news') {
     news = await takeNews(env);
-    if (!news) {
-      await env.DB.prepare('UPDATE users SET next_post_at = ? WHERE id = ?').bind(nextTime(Math.min(intervalMin, 120)), a.id).run();
-      return null;
-    }
+    if (!news) { await toBack.run(); return null; }
   }
   const text = await writePost(env, model, a, news);
   if (!text) {
-    await env.DB.prepare('UPDATE users SET next_post_at = ? WHERE id = ?').bind(now() + 10 * 60_000, a.id).run();
-    await logContent(env.DB, 'error', a.id, `${a.name}：AI 生成失敗，10 分鐘後再試`);
+    await toBack.run();
+    await logContent(env.DB, 'error', a.id, `${a.name}：AI 生成失敗，這次跳過`);
     return null;
   }
   const id = newId();
@@ -74,14 +73,18 @@ async function postOne(env: Env, model: string, a: Account, intervalMin: number)
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO posts (id, user_id, text, link_url, link_title, link_site, source, created_at) VALUES (?, ?, ?, ?, ?, ?, 'content', ?)`)
       .bind(id, a.id, text.slice(0, 1000), news?.url ?? null, news?.title ?? null, news ? siteOf(news.url, news.source) : null, t),
-    env.DB.prepare('UPDATE users SET last_posted_at = ?, next_post_at = ? WHERE id = ?').bind(t, nextTime(intervalMin), a.id),
+    env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(t, a.id),
   ]);
   return id;
 }
 
+/** 全站每天目標則數（後台可調） */
+export const dailyPosts = (s: Record<string, string>) => Math.min(MAX_POSTS_PER_TICK * 1440, Math.max(0, Number(s.daily_posts ?? 200)));
+
 /**
- * 發文排程（每分鐘執行）：每個內容帳號依所屬分組的「平均間隔」各自發文。
- * 第一次遇到還沒有排程的帳號，會先隨機排一個時間，避免所有帳號同時發文。
+ * 發文排程（每分鐘執行）：全站每天約 N 則，啟用中的內容帳號「輪流」發文——
+ * 每次挑最久沒發文的帳號（同樣久的隨機），發完排到最後面。
+ * 每分鐘發幾則依機率決定，所以發文時間自然分散、不會整點一起出現。
  */
 export async function runPostTick(env: Env, opts: { force?: boolean } = {}) {
   const s = await getSettings(env.DB);
@@ -91,31 +94,23 @@ export async function runPostTick(env: Env, opts: { force?: boolean } = {}) {
   }
   const groups = GROUPS.filter((g) => s[`group_${g}`] !== '0');
   if (!groups.length) return { skipped: '所有分組都關閉' };
-  const interval = (g: string) => Math.max(10, Number(s[`interval_${g}`] || 4500));
+  const n = opts.force ? 1 : Math.min(MAX_POSTS_PER_TICK, randRound(dailyPosts(s) / 1440));
+  if (!n) return { skipped: '這分鐘輪空' };
   const model = s.ai_model || env.AI_MODEL;
   const qs = groups.map(() => '?').join(',');
-
-  // 1. 幫還沒排程的帳號隨機排時間（分散在一個間隔內）
-  const fresh = await env.DB.prepare(`SELECT id, content_group FROM users WHERE is_content = 1 AND content_enabled = 1 AND next_post_at IS NULL AND content_group IN (${qs}) LIMIT 200`).bind(...groups).all<{ id: string; content_group: string }>();
-  if (fresh.results.length) {
-    const stmts = fresh.results.map((a) => env.DB.prepare('UPDATE users SET next_post_at = ? WHERE id = ?').bind(now() + Math.round(Math.random() * interval(a.content_group) * 60_000), a.id));
-    for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
-  }
-
-  // 2. 到時間的帳號發文
   const due = await env.DB.prepare(
-    `SELECT id, name, handle, content_group, persona, next_post_at FROM users
-     WHERE is_content = 1 AND content_enabled = 1 AND content_group IN (${qs}) ${opts.force ? '' : 'AND next_post_at <= ?'}
-     ORDER BY next_post_at ASC LIMIT ?`
-  ).bind(...groups, ...(opts.force ? [] : [now()]), opts.force ? 1 : MAX_POSTS_PER_TICK).all<Account>();
-  if (!due.results.length) return { skipped: '還沒有帳號到發文時間' };
+    `SELECT id, name, handle, content_group, persona FROM users
+     WHERE is_content = 1 AND content_enabled = 1 AND content_group IN (${qs})
+     ORDER BY COALESCE(last_posted_at, 0) ASC, RANDOM() LIMIT ?`
+  ).bind(...groups, n).all<Account>();
+  if (!due.results.length) return { skipped: '沒有啟用中的帳號' };
   if (due.results.some((a) => a.content_group === 'news')) {
     const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM news_cache WHERE used = 0 AND fetched_at > ?').bind(now() - 36 * 3600_000).first<{ n: number }>();
     if (!left?.n) await fetchNewsImpl(env);
   }
-  const results = await Promise.all(due.results.map((a) => postOne(env, model, a, interval(a.content_group)).catch(() => null)));
+  const results = await Promise.all(due.results.map((a) => postOne(env, model, a).catch(() => null)));
   const posted = results.filter(Boolean).length;
-  if (posted) await logContent(env.DB, 'post', null, `本分鐘發文 ${posted} 則（${due.results.filter((_, i) => results[i]).map((a) => a.name).slice(0, 5).join('、')}${posted > 5 ? '…' : ''}）`);
+  if (posted) await logContent(env.DB, 'post', null, `發文 ${posted} 則（${due.results.filter((_, i) => results[i]).map((a) => a.name).join('、')}）`);
   return posted ? { posted: results.find(Boolean), account: due.results[results.findIndex(Boolean)].name, count: posted } : { skipped: '這次沒有成功發文（可能沒有新聞或 AI 失敗）' };
 }
 
@@ -129,14 +124,16 @@ export async function runInteractTick(env: Env) {
   if (!recent.results.length) return;
   const likers = await env.DB.prepare('SELECT id FROM users WHERE is_content = 1 AND content_enabled = 1 ORDER BY RANDOM() LIMIT 8').all<{ id: string }>();
 
-  if (s.interact_like === '1') {
-    await Promise.all(recent.results.slice(0, 6).map((p, i) => {
+  // 依每天發文量調整互動量：平均每則文約 5 個讚、每 3 則文約 1 則留言
+  const daily = dailyPosts(s);
+  const likes = Math.min(6, randRound((daily * 5) / 1440));
+  if (s.interact_like === '1' && likes) {
+    await Promise.all(recent.results.slice(0, likes).map((p, i) => {
       const liker = likers.results[i];
       return liker && liker.id !== p.user_id ? addLike(env, p.id, { id: liker.id, is_content: 1 }) : null;
     }));
   }
-  // 留言：平均每 3 分鐘一則
-  if (s.interact_comment === '1' && Math.random() < 0.33) {
+  if (s.interact_comment === '1' && Math.random() < Math.min(1, daily / 3 / 1440)) {
     const p = recent.results[recent.results.length - 1];
     const a = await env.DB.prepare('SELECT id, name, handle, content_group, persona FROM users WHERE is_content = 1 AND content_enabled = 1 AND id != ? ORDER BY RANDOM() LIMIT 1').bind(p.user_id).first<Account>();
     if (!a) return;

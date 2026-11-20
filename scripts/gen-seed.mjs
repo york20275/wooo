@@ -1,4 +1,4 @@
-// 產生 150 個 ✦ 平台內容帳號的種子資料：node scripts/gen-seed.mjs > seed-content-accounts.sql
+// 產生 450 個 ✦ 平台內容帳號的種子資料（名字像一般人，主題與說話風格由下面的分組決定）：node scripts/gen-seed.mjs > seed-content-accounts.sql
 const groups = {
   news: {
     prefixes: [
@@ -83,17 +83,51 @@ const groups = {
   },
 };
 
+
+// 固定亂數種子，每次產生的結果一樣
+let seed = 20261120;
+const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+const pick = (a) => a[Math.floor(rand() * a.length)];
+const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+const SURNAMES = [['陳','chen'],['林','lin'],['黃','huang'],['張','chang'],['李','lee'],['王','wang'],['吳','wu'],['劉','liu'],['蔡','tsai'],['楊','yang'],
+  ['許','hsu'],['鄭','cheng'],['謝','hsieh'],['郭','kuo'],['洪','hung'],['曾','tseng'],['邱','chiu'],['廖','liao'],['賴','lai'],['周','chou'],
+  ['徐','hsu'],['蘇','su'],['葉','yeh'],['莊','chuang'],['呂','lu'],['江','chiang'],['何','ho'],['蕭','hsiao'],['羅','lo'],['高','kao']];
+const GIVEN = [['怡','yi'],['君','chun'],['婷','ting'],['雅','ya'],['筑','chu'],['宜','yi'],['庭','ting'],['佳','chia'],['欣','hsin'],['涵','han'],
+  ['萱','hsuan'],['瑜','yu'],['芸','yun'],['詩','shih'],['彤','tung'],['家','chia'],['豪','hao'],['冠','kuan'],['宇','yu'],['承','cheng'],
+  ['翰','han'],['柏','po'],['宏','hung'],['俊','chun'],['傑','chieh'],['志','chih'],['明','ming'],['哲','che'],['偉','wei'],['育','yu'],
+  ['安','an'],['睿','jui'],['品','pin'],['妤','yu'],['晴','ching'],['軒','hsuan'],['廷','ting'],['恩','en'],['郁','yu'],['凱','kai']];
+const NICK = ['阿凱','阿哲','阿宏','阿傑','阿明','阿翔','阿豪','阿偉','小雨','小晴','小魚','小安','小葉','小米','小恩','小琪','婷婷','芸芸','佳佳','欣欣','萱萱','瑜瑜','彤彤','恩恩',
+  '胖虎不胖','貓奴阿敏','台中小許','高雄阿鴻','新竹工程獅','板橋王小姐','三重李先生','台南吃貨','花蓮女孩','宜蘭阿伯的孫子','桃園通勤族','基隆雨人'];
+const NICK_EN = ['ahkai','ahche','ahhung','ahchieh','ahming','ahhsiang','ahhao','ahwei','xiaoyu','xiaoqing','xiaofish','xiaoan','xiaoyeh','xiaomi','xiaoen','xiaochi','tingting','yunyun','chiachia','hsinhsin','hsuanhsuan','yuyu','tungtung','enen',
+  'notfat_tiger','catslave_min','taichung_hsu','kaohsiung_hung','hsinchu_eng','banqiao_ms_wang','sanchong_lee','tainan_foodie','hualien_girl','yilan_grandson','taoyuan_commuter','keelung_rainman'];
+const EN = ['Kevin','Amy','Jerry','Vivian','Eric','Joanne','Andy','Cindy','Jason','Tina','Allen','Grace','Ryan','Iris','Leo','Nina','Ken','Peggy','Sam','Wendy','Chris','Ivy','Tony','Mia','Jack','Sandy','Ben','Emma','Max','Rita'];
+
+const used = new Set(); const usedHandles = new Set();
+function makeName() {
+  for (;;) {
+    const r = rand(); let name, handle;
+    const [sz, se] = pick(SURNAMES);
+    if (r < 0.45) { const [g1, e1] = pick(GIVEN); const [g2, e2] = pick(GIVEN); if (g1 === g2) continue; name = sz + g1 + g2; handle = `${e1}${e2}.${se}`; }
+    else if (r < 0.6) { const i = Math.floor(rand() * NICK.length); name = NICK[i]; handle = NICK_EN[i]; }
+    else if (r < 0.8) { const en = pick(EN); name = rand() < 0.5 ? `${en} ${sz}` : `${en} ${se[0].toUpperCase()}${se.slice(1)}`; handle = `${en.toLowerCase()}_${se}`; }
+    else { const [g1, e1] = pick(GIVEN); const [g2, e2] = pick(GIVEN); if (g1 === g2) continue; name = `${e1}${e2}${pick(['', '_', '.'])}${String(Math.floor(rand() * 9000) + 100)}`; handle = name.replace(/[^a-z0-9_.]/g, ''); }
+    if (used.has(name)) continue;
+    let h = handle, n = 2; while (usedHandles.has(h)) h = `${handle}${n++}`;
+    used.add(name); usedHandles.add(h); return [name, h];
+  }
+}
+
 const esc = (s) => s.replace(/'/g, "''");
 const t0 = Date.UTC(2026, 10, 1);
 const rows = [];
 for (const [group, def] of Object.entries(groups)) {
-  for (const [pz, pe, ptopic] of def.prefixes) {
-    for (const [sz, se, sstyle] of def.suffixes) {
-      const name = `${pz}${sz}`;
-      const handle = `${pe}_${se}`;
-      const persona = `${ptopic}；說話風格：${sstyle}`;
-      rows.push(`('c_${handle}', '${esc(name)}', '${handle}', 1, '${group}', '${esc(persona)}', ${t0})`);
-    }
+  const combos = [];
+  for (const [, , ptopic] of def.prefixes) for (const [, , sstyle] of def.suffixes) combos.push(`${ptopic}；說話風格：${sstyle}`);
+  for (const persona of shuffle(combos)) {
+    const [name, handle] = makeName();
+    const id = 'c_' + handle.replace(/\./g, '_');
+    rows.push(`('${id}', '${esc(name)}', '${handle}', 1, '${group}', '${esc(persona)}', ${t0 + Math.floor(rand() * 20 * 86400_000)})`);
   }
 }
 console.log(`-- ${rows.length} 個 ✦ 平台內容帳號`);

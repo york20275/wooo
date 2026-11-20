@@ -3,7 +3,7 @@ import type { AppEnv, User } from './env';
 import { getSettings, logAudit, now, setSetting, twDay } from './env';
 import { HttpError, deletePost } from './api';
 import { deleteUserData } from './social';
-import { runPostTick, fetchNews } from './content';
+import { runPostTick, fetchNews, dailyPosts } from './content';
 
 export const admin = new Hono<AppEnv>();
 
@@ -33,8 +33,7 @@ admin.get('/dashboard', async (c) => {
   ]);
   const s = await getSettings(db);
   const enabledAccounts = await q('SELECT COUNT(*) AS n FROM users WHERE is_content = 1 AND content_enabled = 1');
-  const byGroup = await db.prepare('SELECT content_group AS g, COUNT(*) AS n FROM users WHERE is_content = 1 AND content_enabled = 1 GROUP BY content_group').all<{ g: string; n: number }>();
-  const perDay = byGroup.results.reduce((sum, r) => sum + (s[`group_${r.g}`] === '0' ? 0 : (r.n * 1440) / Math.max(10, Number(s[`interval_${r.g}`] || 4500))), 0);
+  const perDay = dailyPosts(s);
   const latest = await db.prepare(
     "SELECT id, name, handle, avatar_key, created_at FROM users WHERE is_content = 0 ORDER BY created_at DESC LIMIT 6"
   ).all();
@@ -162,7 +161,7 @@ admin.get('/content', async (c) => {
   const log = await c.env.DB.prepare('SELECT kind, detail, created_at FROM content_log ORDER BY created_at DESC LIMIT 30').all();
   const byGroup = await c.env.DB.prepare('SELECT content_group AS g, COUNT(*) AS n, SUM(content_enabled) AS on_n FROM users WHERE is_content = 1 GROUP BY content_group').all<{ g: string; n: number; on_n: number }>();
   const groups = Object.fromEntries(byGroup.results.map((r) => [r.g, { total: r.n, enabled: r.on_n }]));
-  const perDay = byGroup.results.reduce((sum, r) => sum + (s[`group_${r.g}`] === '0' ? 0 : (r.on_n * 1440) / Math.max(10, Number(s[`interval_${r.g}`] || 4500))), 0);
+  const perDay = dailyPosts(s);
   return c.json({
     accounts: r.results,
     settings: { ...s, newsdata_key: s.newsdata_key ? '已設定' : '' },
@@ -186,7 +185,7 @@ admin.patch('/content/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-const EDITABLE = ['content_enabled', 'interval_news', 'interval_game', 'interval_mixed', 'interval_fun', 'interact_like', 'interact_comment', 'old_posts_mode',
+const EDITABLE = ['content_enabled', 'daily_posts', 'interact_like', 'interact_comment', 'old_posts_mode',
   'group_news', 'group_game', 'group_mixed', 'group_fun', 'paused_until', 'newsdata_key', 'rss_feeds', 'feed_content_ratio', 'ai_model'];
 export const AI_MODELS = ['', '@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct-fp8-fast', '@cf/meta/llama-4-scout-17b-16e-instruct'];
 admin.patch('/settings', async (c) => {
@@ -194,7 +193,7 @@ admin.patch('/settings', async (c) => {
   for (const [k, v] of Object.entries(b)) {
     if (!EDITABLE.includes(k)) continue;
     let val = String(v);
-    if (k.startsWith('interval_') && !(Number(val) >= 10 && Number(val) <= 20160)) continue;
+    if (k === 'daily_posts' && !(Number(val) >= 0 && Number(val) <= 14400)) continue;
     if (k === 'feed_content_ratio' && !(Number(val) >= 0 && Number(val) <= 100)) continue;
     if (k === 'ai_model' && !AI_MODELS.includes(val)) continue;
     if (k === 'old_posts_mode' && !['keep', 'hide'].includes(val)) continue;
