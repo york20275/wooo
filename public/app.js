@@ -215,7 +215,7 @@ const dot = (n, label) => (n ? h('span', { class: 'dot', 'aria-label': `${n} ${l
 function sideNav(path) {
   const link = (href, label, extra) => h('a', { href, class: path === href ? 'active' : '' }, label, extra);
   return h('nav', { class: 'side', 'aria-label': '主選單' },
-    link('/', '首頁'), link('/explore', '探索'), link('/communities', '社團'),
+    link('/', '首頁'), link('/explore', '探索'), link('/communities', '分類版'),
     link('/notifications', '通知', dot(S.unread, '則未讀通知')),
     S.me ? link('/messages', '私訊', dot(S.unreadMsg, '則未讀私訊')) : null,
     S.me ? link('/bookmarks', '收藏') : null,
@@ -226,7 +226,7 @@ function sideNav(path) {
 function bottomNav(path) {
   const link = (href, ic, label, n) => h('a', { href, class: path === href ? 'active' : '', 'aria-label': label }, icon(ic), n ? h('span', { class: 'dot', style: 'position:absolute;top:12px;right:12px' }) : null);
   return h('nav', { class: 'bottom', 'aria-label': '主選單' },
-    link('/', 'home', '首頁'), link('/explore', 'search', '探索'), link('/communities', 'users', '社團'),
+    link('/', 'home', '首頁'), link('/explore', 'search', '探索'), link('/communities', 'users', '分類版'),
     S.me ? link('/messages', 'mail', '私訊', S.unreadMsg) : null,
     link('/notifications', 'bell', '通知', S.unread),
     S.me ? link(`/u/${S.me.handle}`, 'user', '個人頁') : link('/settings', 'gear', '設定'));
@@ -484,8 +484,8 @@ function composer(onPosted, opts = {}) {
     const text = ta.value.trim() + (tags.length ? `\n${tags.map((t) => `#${t}`).join(' ')}` : '');
     send.disabled = true;
     try {
-      await api('POST', '/api/posts', { text, image_keys: pick.keys(), sensitive: sens.checked, poll, community_id: csel.value || null });
-      ta.value = ''; pick.reset(); sens.checked = false; if (!opts.communityId) csel.value = '';
+      await api('POST', '/api/posts', { text, image_keys: pick.keys(), sensitive: sens.checked, poll, community_id: csel.value || 'cm_free' });
+      ta.value = ''; pick.reset(); sens.checked = false;
       tags = []; tagRow.hidden = true; togglePoll(false);
       toast('已發布'); onPosted?.();
     } catch (e) { err.textContent = e.message; } finally { send.disabled = false; }

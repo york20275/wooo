@@ -76,9 +76,10 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   if (!text) { await toBack.run(); return null; }
   // 照片找不到就只發文字，不影響發文
   const photo = wantPhoto ? await findPhoto(env, query || topicQuery(a.persona)).catch(() => null) : null;
-  // 部分文章發到對應的官方社團（例如遊戲帳號 → 遊戲閒聊）
+  // 文章發到對應的分類版（例如遊戲帳號 → 遊戲閒聊）
   const cm = Math.random() * 100 < communityRatio
-    ? await env.DB.prepare('SELECT id FROM communities WHERE official = 1 AND content_group = ? LIMIT 1').bind(a.content_group).first<{ id: string }>()
+    ? (await env.DB.prepare('SELECT id FROM communities WHERE content_group = ? LIMIT 1').bind(a.content_group).first<{ id: string }>())
+      ?? (await env.DB.prepare("SELECT id FROM communities WHERE id = 'cm_free'").first<{ id: string }>()) // 沒有對應的分類版就放「暢所欲言」
     : null;
   const id = newId();
   const t = now();
@@ -121,7 +122,7 @@ export async function runPostTick(env: Env, opts: { force?: boolean } = {}) {
     const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM news_cache WHERE used = 0 AND fetched_at > ?').bind(now() - 36 * 3600_000).first<{ n: number }>();
     if (!left?.n) await fetchNewsImpl(env);
   }
-  const results = await Promise.all(due.results.map((a) => postOne(env, model, a, Number(s.photo_ratio ?? 30), Number(s.community_ratio ?? 30)).catch(() => null)));
+  const results = await Promise.all(due.results.map((a) => postOne(env, model, a, Number(s.photo_ratio ?? 30), Number(s.community_ratio ?? 100)).catch(() => null)));
   const posted = results.filter(Boolean).length;
   if (posted) await logContent(env.DB, 'post', null, `發文 ${posted} 則（${due.results.filter((_, i) => results[i]).map((a) => a.name).join('、')}）`);
   return posted ? { posted: results.find(Boolean), account: due.results[results.findIndex(Boolean)].name, count: posted } : { skipped: '這次沒有成功發文（可能沒有新聞或 AI 失敗）' };

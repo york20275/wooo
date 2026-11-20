@@ -1,5 +1,5 @@
 'use strict';
-/* 窩Woo！進階功能：表情回應、轉發、收藏、多圖、限時動態、社團、每日投票、處理通知與申訴、透明度報告、個人過濾、徽章 */
+/* 窩Woo！進階功能：表情回應、轉發、收藏、多圖、限時動態、分類版、每日投票、處理通知與申訴、透明度報告、個人過濾、徽章 */
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '😡'];
 const MOD_REASONS = [['spam', '垃圾訊息或廣告'], ['scam', '詐騙'], ['harassment', '騷擾或人身攻擊'], ['privacy', '公開他人個資'], ['unmarked_sensitive', '敏感內容未標記'], ['copyright', '侵權'], ['illegal', '違法內容'], ['violence', '暴力威脅'], ['other', '其他']];
@@ -262,39 +262,16 @@ function dailyPollCard() {
   return box;
 }
 
-// ---------- 社團 ----------
+// ---------- 分類版（只有官方，GM 在後台管理） ----------
 async function communitiesPage() {
   const main = h('main', { class: 'main' }, h('div', { class: 'empty' }, '載入中…'));
   shell('/communities', main);
   try {
     const d = await api('GET', '/api/communities');
-    const card = (c) => h('a', { class: 'ccard glass', href: `/c/${c.slug}` },
-      h('span', { class: 'cicon' }, c.icon || '💬'),
-      h('div', { class: 'body' }, h('b', null, c.name, c.official ? h('span', { class: 'pill', style: 'margin-left:6px' }, '官方') : null, c.joined ? h('span', { class: 'pill ok', style: 'margin-left:6px' }, '已加入') : null),
-        h('span', { class: 'muted' }, c.description || ''), h('small', { class: 'muted' }, `${c.member_count} 位成員 · ${c.post_count} 篇文章`)));
-    const joined = d.communities.filter((c) => c.joined);
-    main.replaceChildren(
-      h('div', { class: 'row between' }, pageTitle('社團'), S.me ? h('button', { class: 'btn small', onclick: createCommunityModal }, '＋ 建立社團') : null),
-      joined.length ? h('h2', { class: 'subhead' }, '我加入的') : null, ...joined.map(card),
-      h('h2', { class: 'subhead' }, '所有社團'), ...d.communities.filter((c) => !c.joined).map(card));
+    main.replaceChildren(pageTitle('分類版'), h('span', { class: 'muted', style: 'margin:0 4px' }, '發文時選一個分類版，文章就會出現在那裡。'),
+      ...d.communities.map((c) => h('a', { class: 'ccard glass', href: `/c/${c.slug}` }, h('span', { class: 'cicon' }, c.icon || '💬'),
+        h('div', { class: 'body' }, h('b', null, c.name), h('span', { class: 'muted' }, c.description || ''), h('small', { class: 'muted' }, `${c.post_count} 篇文章`)))));
   } catch (e) { main.replaceChildren(h('div', { class: 'empty err' }, e.message)); }
-}
-
-function createCommunityModal() {
-  const name = h('input', { maxlength: '20', placeholder: '例如：台中美食' });
-  const slug = h('input', { maxlength: '24', placeholder: '例如：taichung-food', autocapitalize: 'off' });
-  const icon_ = h('input', { maxlength: '4', placeholder: '🍜', style: 'width:80px' });
-  const desc = h('textarea', { rows: '3', maxlength: '200', placeholder: '這個社團在聊什麼？' });
-  const err = h('span', { class: 'err' });
-  const m = modal('建立社團',
-    h('label', { class: 'field' }, '社團名稱', name),
-    h('label', { class: 'field' }, '網址代號（英文小寫、數字、-）', slug, h('small', { class: 'muted' }, '社團網址會是 wootw.com/c/代號')),
-    h('label', { class: 'field' }, '圖示（一個表情符號）', icon_),
-    h('label', { class: 'field' }, '介紹', desc), err,
-    h('button', { class: 'btn', onclick: async () => {
-      try { const d = await api('POST', '/api/communities', { name: name.value, slug: slug.value, icon: icon_.value, description: desc.value }); m.remove(); toast('社團建立好了'); navigate(`/c/${d.slug}`); }
-      catch (e) { err.textContent = e.message; }
-    } }, '建立'));
 }
 
 async function communityPage(slug) {
@@ -303,43 +280,26 @@ async function communityPage(slug) {
   try {
     const first = await api('GET', `/api/communities/${slug}`);
     const c = first.community;
-    const actions = h('div', { class: 'row wrap' });
-    if (S.me) {
-      if (c.role !== 'owner') actions.append(h('button', { class: c.joined ? 'btn ghost small' : 'btn small', onclick: async () => {
-        try { await api(c.joined ? 'DELETE' : 'POST', `/api/communities/${slug}/join`); communityPage(slug); } catch (e) { toast(e.message); }
-      } }, c.joined ? '已加入（點擊退出）' : '加入社團'));
-      if (c.role === 'owner' || S.me.role === 'gm') actions.append(h('button', { class: 'btn ghost small', onclick: () => {
-        const desc = h('textarea', { rows: '3', maxlength: '200' }); desc.value = c.description || '';
-        const ic = h('input', { maxlength: '4', value: c.icon || '', style: 'width:80px' });
-        const m = modal('編輯社團', h('label', { class: 'field' }, '圖示', ic), h('label', { class: 'field' }, '介紹', desc),
-          h('button', { class: 'btn', onclick: async () => { await api('PATCH', `/api/communities/${slug}`, { description: desc.value, icon: ic.value }); m.remove(); communityPage(slug); } }, '儲存'));
-      } }, '編輯'));
-      if (S.me.role === 'gm') actions.append(h('button', { class: 'btn danger small', onclick: async () => {
-        if (!confirm(`刪除社團「${c.name}」？文章會保留，但不再屬於這個社團。`)) return;
-        await api('DELETE', `/api/communities/${slug}`); toast('已刪除社團'); navigate('/communities');
-      } }, '刪除社團'));
-    } else actions.append(loginButton());
     const head = h('section', { class: 'card glass chead' },
       h('div', { class: 'row', style: 'gap:14px' }, h('span', { class: 'cicon lg' }, c.icon || '💬'),
-        h('div', null, h('h1', { style: 'font-size:22px;margin:0' }, c.name, c.official ? h('span', { class: 'pill', style: 'margin-left:8px' }, '官方') : null),
-          h('span', { class: 'muted' }, `${c.member_count} 位成員 · ${c.post_count} 篇文章${c.owner ? ` · 建立者 ${c.owner.name}` : ''}`))),
-      c.description ? h('p', { style: 'margin:0' }, c.description) : null, actions);
-    const pl = postList(async (st) => (st.before ? (await api('GET', `/api/communities/${slug}?before=${st.before}`)).posts : first.posts), '這個社團還沒有文章，來發第一篇吧');
-    const comp = S.me && c.joined ? composer(() => communityPage(slug), { communityId: c.id, communityName: c.name }) : null;
-    main.replaceChildren(head, comp || (S.me ? h('div', { class: 'card glass' }, h('span', { class: 'muted' }, '加入社團後就能在這裡發文')) : null), pl.el);
+        h('div', null, h('h1', { style: 'font-size:22px;margin:0' }, c.name), h('span', { class: 'muted' }, `${c.post_count} 篇文章`))),
+      c.description ? h('p', { style: 'margin:0' }, c.description) : null,
+      S.me?.role === 'gm' ? h('a', { class: 'btn ghost small', href: '/admin/boards', style: 'align-self:flex-start' }, '在後台管理分類版') : null);
+    const pl = postList(async (st) => (st.before ? (await api('GET', `/api/communities/${slug}?before=${st.before}`)).posts : first.posts), '這個分類版還沒有文章，來發第一篇吧');
+    const comp = S.me ? composer(() => communityPage(slug), { communityId: c.id, communityName: c.name }) : h('div', { class: 'card glass' }, h('span', null, '登入後就能在這裡發文'), loginButton());
+    main.replaceChildren(head, comp, pl.el);
     pl.load(true);
   } catch (e) { main.replaceChildren(h('div', { class: 'empty glass' }, e.message)); }
 }
 
-/** 發文框的「發到社團」選單（只列出加入的社團） */
+/** 發文框的分類版選單：一定要選一個，預設「暢所欲言」 */
 function communitySelect(fixed) {
-  const sel = h('select', { class: 'csel', 'aria-label': '發到社團' }, h('option', { value: '' }, '不發到社團'));
-  if (fixed) { sel.replaceChildren(h('option', { value: fixed.communityId }, `發到「${fixed.communityName}」`)); sel.disabled = true; return sel; }
+  const sel = h('select', { class: 'csel', 'aria-label': '發到哪個分類版' });
+  if (fixed) { sel.append(h('option', { value: fixed.communityId }, `發到「${fixed.communityName}」`)); sel.disabled = true; return sel; }
+  sel.append(h('option', { value: 'cm_free' }, '💬 暢所欲言'));
   api('GET', '/api/communities').then((d) => {
-    const mine = d.communities.filter((c) => c.joined);
-    sel.append(...mine.map((c) => h('option', { value: c.id }, `${c.icon} ${c.name}`)));
-    sel.hidden = !mine.length;
-  }).catch(() => { sel.hidden = true; });
+    sel.replaceChildren(...d.communities.map((c) => h('option', { value: c.id, selected: c.id === 'cm_free' ? true : null }, `${c.icon} ${c.name}`)));
+  }).catch(() => {});
   return sel;
 }
 

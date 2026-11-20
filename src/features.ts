@@ -176,106 +176,93 @@ export async function cleanupStories(env: Env) {
   await deleteStories(env, r.results);
 }
 
-// ======================= 社團 =======================
-const pubCommunity = (x: any) => ({
-  id: x.id, slug: x.slug, name: x.name, description: x.description, icon: x.icon, official: !!x.official,
-  member_count: x.member_count, post_count: x.post_count, joined: !!x.joined, role: x.role || null, owner_id: x.owner_id,
+// ======================= 分類版（只有官方，GM 管理） =======================
+const pubBoard = (x: any) => ({
+  id: x.id, slug: x.slug, name: x.name, description: x.description, icon: x.icon, post_count: x.post_count, content_group: x.content_group,
 });
 
 features.get('/communities', async (c) => {
-  const u = c.get('user') as User | null;
-  const r = await c.env.DB.prepare(
-    `SELECT cm.*, m.role, m.user_id IS NOT NULL AS joined FROM communities cm
-     LEFT JOIN community_members m ON m.community_id = cm.id AND m.user_id = ?
-     ORDER BY cm.official DESC, cm.member_count DESC, cm.post_count DESC LIMIT 200`
-  ).bind(u?.id ?? '').all();
-  return c.json({ communities: r.results.map(pubCommunity) });
+  const r = await c.env.DB.prepare('SELECT * FROM communities ORDER BY created_at, name LIMIT 200').all();
+  return c.json({ communities: r.results.map(pubBoard) });
 });
 
-features.post('/communities', async (c) => {
-  const u = requireUser(c);
-  requireHuman(c, u);
-  const b = await c.req.json<any>();
-  const name = String(b.name || '').trim().slice(0, 20);
-  const slug = String(b.slug || '').trim().toLowerCase();
-  const description = String(b.description || '').trim().slice(0, 200);
-  const icon = Array.from(String(b.icon || '💬').trim())[0] || '💬';
-  if (name.length < 2) throw new HttpError(400, '社團名稱至少 2 個字');
-  if (!/^[a-z0-9-]{3,24}$/.test(slug)) throw new HttpError(400, '網址代號只能用 3～24 個英文小寫、數字或 -');
-  const own = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM communities WHERE owner_id = ?').bind(u.id).first<{ n: number }>();
-  if ((own?.n ?? 0) >= 3) throw new HttpError(400, '每個人最多建立 3 個社團');
-  const dup = await c.env.DB.prepare('SELECT 1 FROM communities WHERE slug = ? OR name = ?').bind(slug, name).first();
-  if (dup) throw new HttpError(400, '這個名稱或網址代號已經有人用了');
-  const id = newId();
-  await c.env.DB.batch([
-    c.env.DB.prepare('INSERT INTO communities (id, slug, name, description, icon, owner_id, member_count, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)').bind(id, slug, name, description, icon, u.id, now()),
-    c.env.DB.prepare("INSERT INTO community_members (community_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)").bind(id, u.id, now()),
-  ]);
-  return c.json({ id, slug });
-});
-
-async function findCommunity(c: any) {
-  const u = c.get('user') as User | null;
-  const x = await c.env.DB.prepare(
-    `SELECT cm.*, m.role, m.user_id IS NOT NULL AS joined FROM communities cm
-     LEFT JOIN community_members m ON m.community_id = cm.id AND m.user_id = ? WHERE cm.slug = ?`
-  ).bind(u?.id ?? '', c.req.param('slug')).first();
-  if (!x) throw new HttpError(404, '找不到這個社團');
+async function findBoard(c: any) {
+  const x = await c.env.DB.prepare('SELECT * FROM communities WHERE slug = ?').bind(c.req.param('slug')).first();
+  if (!x) throw new HttpError(404, '找不到這個分類版');
   return x;
 }
 
 features.get('/communities/:slug', async (c) => {
-  const x: any = await findCommunity(c);
+  const x: any = await findBoard(c);
   const before = Number(c.req.query('before') || 0);
   const [vis, vb] = await visibility(c);
   const r = await c.env.DB.prepare(
     `SELECT ${POST_COLS} FROM posts p JOIN users u ON u.id = p.user_id WHERE ${vis} AND p.community_id = ? ${before ? 'AND p.created_at < ?' : ''} ORDER BY p.created_at DESC LIMIT 20`
   ).bind(...vb, x.id, ...(before ? [before] : [])).all();
-  const owner = x.owner_id ? await c.env.DB.prepare('SELECT id, name, handle, avatar_key, is_content FROM users WHERE id = ?').bind(x.owner_id).first() : null;
-  return c.json({ community: { ...pubCommunity(x), owner: owner ? pubUser(owner) : null }, posts: await serializeMany(c, r.results) });
+  return c.json({ community: pubBoard(x), posts: await serializeMany(c, r.results) });
 });
 
-features.patch('/communities/:slug', async (c) => {
+function requireGm(c: any) {
   const u = requireUser(c);
-  const x: any = await findCommunity(c);
-  if (x.owner_id !== u.id && u.role !== 'gm') throw new HttpError(403, '只有社團建立者可以修改');
+  if (u.role !== 'gm') throw new HttpError(403, '只有 GM 可以管理分類版');
+  return u;
+}
+function boardInput(b: any) {
+  const name = String(b.name || '').trim().slice(0, 20);
+  const description = String(b.description || '').trim().slice(0, 200);
+  const icon = Array.from(String(b.icon || '💬').trim())[0] || '💬';
+  const group = ['news', 'game', 'mixed', 'fun'].includes(b.content_group) ? b.content_group : null;
+  if (name.length < 2) throw new HttpError(400, '分類版名稱至少 2 個字');
+  return { name, description, icon, group };
+}
+
+/** GM 新增分類版 */
+features.post('/communities', async (c) => {
+  const u = requireGm(c);
   const b = await c.req.json<any>();
-  const description = String(b.description ?? x.description).trim().slice(0, 200);
-  const icon = Array.from(String(b.icon || x.icon).trim())[0] || x.icon;
-  await c.env.DB.prepare('UPDATE communities SET description = ?, icon = ? WHERE id = ?').bind(description, icon, x.id).run();
-  return c.json({ ok: true });
-});
-
-features.post('/communities/:slug/join', async (c) => {
-  const u = requireUser(c);
-  const x: any = await findCommunity(c);
-  const r = await c.env.DB.prepare('INSERT OR IGNORE INTO community_members (community_id, user_id, created_at) VALUES (?, ?, ?)').bind(x.id, u.id, now()).run();
-  if (r.meta.changes) await c.env.DB.prepare('UPDATE communities SET member_count = member_count + 1 WHERE id = ?').bind(x.id).run();
-  return c.json({ ok: true });
-});
-
-features.delete('/communities/:slug/join', async (c) => {
-  const u = requireUser(c);
-  const x: any = await findCommunity(c);
-  if (x.owner_id === u.id) throw new HttpError(400, '建立者不能退出自己的社團');
-  const r = await c.env.DB.prepare('DELETE FROM community_members WHERE community_id = ? AND user_id = ?').bind(x.id, u.id).run();
-  if (r.meta.changes) await c.env.DB.prepare('UPDATE communities SET member_count = MAX(member_count - 1, 0) WHERE id = ?').bind(x.id).run();
-  return c.json({ ok: true });
-});
-
-/** GM 刪除社團：文章保留，只是不再屬於社團 */
-features.delete('/communities/:slug', async (c) => {
-  const u = requireUser(c);
-  if (u.role !== 'gm') throw new HttpError(403, '只有 GM 可以刪除社團');
-  const x: any = await findCommunity(c);
+  const { name, description, icon, group } = boardInput(b);
+  const slug = String(b.slug || '').trim().toLowerCase();
+  if (!/^[a-z0-9-]{2,24}$/.test(slug)) throw new HttpError(400, '網址代號只能用 2～24 個英文小寫、數字或 -');
+  const dup = await c.env.DB.prepare('SELECT 1 FROM communities WHERE slug = ? OR name = ?').bind(slug, name).first();
+  if (dup) throw new HttpError(400, '這個名稱或網址代號已經有了');
+  const id = 'cm_' + newId().slice(0, 12);
   await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE posts SET community_id = NULL WHERE community_id = ?').bind(x.id),
-    c.env.DB.prepare('DELETE FROM community_members WHERE community_id = ?').bind(x.id),
-    c.env.DB.prepare('DELETE FROM communities WHERE id = ?').bind(x.id),
-    c.env.DB.prepare('INSERT INTO audit_log (id, gm_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(newId(), u.id, 'community_delete', x.id, x.name, now()),
+    c.env.DB.prepare('INSERT INTO communities (id, slug, name, description, icon, official, content_group, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)').bind(id, slug, name, description, icon, group, now()),
+    c.env.DB.prepare('INSERT INTO audit_log (id, gm_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(newId(), u.id, 'board_create', id, name, now()),
+  ]);
+  return c.json({ id, slug });
+});
+
+/** GM 修改分類版 */
+features.patch('/communities/:slug', async (c) => {
+  const u = requireGm(c);
+  const x: any = await findBoard(c);
+  const { name, description, icon, group } = boardInput({ ...x, ...(await c.req.json<any>()) });
+  const dup = await c.env.DB.prepare('SELECT 1 FROM communities WHERE name = ? AND id != ?').bind(name, x.id).first();
+  if (dup) throw new HttpError(400, '這個名稱已經有了');
+  if (group) await c.env.DB.prepare('UPDATE communities SET content_group = NULL WHERE content_group = ? AND id != ?').bind(group, x.id).run();
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE communities SET name = ?, description = ?, icon = ?, content_group = ? WHERE id = ?').bind(name, description, icon, group, x.id),
+    c.env.DB.prepare('INSERT INTO audit_log (id, gm_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(newId(), u.id, 'board_edit', x.id, name, now()),
   ]);
   return c.json({ ok: true });
 });
+
+/** GM 刪除分類版：文章移到「暢所欲言」 */
+features.delete('/communities/:slug', async (c) => {
+  const u = requireGm(c);
+  const x: any = await findBoard(c);
+  if (x.id === DEFAULT_BOARD) throw new HttpError(400, '「暢所欲言」是預設分類版，不能刪除');
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE communities SET post_count = post_count + ? WHERE id = ?').bind(x.post_count, DEFAULT_BOARD),
+    c.env.DB.prepare('UPDATE posts SET community_id = ? WHERE community_id = ?').bind(DEFAULT_BOARD, x.id),
+    c.env.DB.prepare('DELETE FROM communities WHERE id = ?').bind(x.id),
+    c.env.DB.prepare('INSERT INTO audit_log (id, gm_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(newId(), u.id, 'board_delete', x.id, x.name, now()),
+  ]);
+  return c.json({ ok: true });
+});
+
+export const DEFAULT_BOARD = 'cm_free';
 
 // ======================= 每日熱門投票 =======================
 features.get('/daily-poll', async (c) => {
@@ -344,18 +331,16 @@ export const BADGES: Record<string, { label: string; icon: string; desc: string 
   replier: { label: '熱心回覆', icon: '💬', desc: '留言超過 100 則' },
   popular: { label: '人氣作者', icon: '⭐', desc: '文章累積超過 300 個真人讚' },
   pollster: { label: '投票達人', icon: '📊', desc: '發起超過 10 次投票' },
-  founder: { label: '社團創辦人', icon: '🏠', desc: '建立了自己的社團' },
 };
 
 export async function badgesFor(env: Env, u: User) {
   if (u.is_content) return [];
   const q = (sql: string, ...b: any[]) => env.DB.prepare(sql).bind(...b).first<{ n: number }>().then((r) => r?.n ?? 0);
-  const [rank, comments, likes, polls, owns] = await Promise.all([
+  const [rank, comments, likes, polls] = await Promise.all([
     q('SELECT COUNT(*) AS n FROM users WHERE is_content = 0 AND created_at < ?', u.created_at),
     q('SELECT COUNT(*) AS n FROM comments WHERE user_id = ?', u.id),
     q('SELECT COALESCE(SUM(real_like_count), 0) AS n FROM posts WHERE user_id = ?', u.id),
     q('SELECT COUNT(*) AS n FROM polls pl JOIN posts p ON p.id = pl.post_id WHERE p.user_id = ?', u.id),
-    q('SELECT COUNT(*) AS n FROM communities WHERE owner_id = ?', u.id),
   ]);
   const keys: string[] = [];
   if (u.role === 'gm') keys.push('gm');
@@ -363,6 +348,5 @@ export async function badgesFor(env: Env, u: User) {
   if (comments >= 100) keys.push('replier');
   if (likes >= 300) keys.push('popular');
   if (polls >= 10) keys.push('pollster');
-  if (owns > 0) keys.push('founder');
   return keys.map((k) => ({ key: k, ...BADGES[k] }));
 }

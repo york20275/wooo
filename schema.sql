@@ -313,7 +313,7 @@ CREATE TABLE IF NOT EXISTS story_views (
   PRIMARY KEY (story_id, user_id)
 );
 
--- 社團／看板
+-- 分類版（只有官方，由 GM 在後台管理；用戶發文時選一個分類版）
 CREATE TABLE IF NOT EXISTS communities (
   id TEXT PRIMARY KEY,
   slug TEXT NOT NULL UNIQUE,
@@ -355,7 +355,7 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
   ('content_enabled', '1'),
   ('daily_posts', '200'),                    -- 全站 ✦ 帳號每天約發幾則（輪流）
   ('photo_ratio', '30'),
-  ('community_ratio', '30'),                 -- ✦ 貼文有幾 % 發到對應的官方社團
+  ('community_ratio', '100'),                -- ✦ 貼文有幾 % 發到對應的分類版
   ('daily_poll', '1'),                       -- 每天一題 ✦ 全站投票                     -- 非時事的 ✦ 貼文有幾 % 附真實照片（Pexels）
   ('pexels_key', ''),
   ('group_fun', '1'),

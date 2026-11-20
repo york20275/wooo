@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv, Env, User } from './env';
 import { canSeeSensitive, findMentions, getSetting, imgUrl, isBlockedEither, logAudit, newId, now, twDay } from './env';
 import { cleanReason, MOD_REASONS, recordAction } from './moderation';
-import { badgesFor } from './features';
+import { badgesFor, DEFAULT_BOARD } from './features';
 import { notify } from './notify';
 
 export const api = new Hono<AppEnv>();
@@ -149,7 +149,7 @@ export async function pollsFor(c: any, ids: string[]): Promise<Map<string, any>>
 }
 
 /**
- * 文章列表輸出：表情回應、收藏、投票、社團、轉發／引用的原文一起載入。
+ * 文章列表輸出：表情回應、收藏、投票、分類版、轉發／引用的原文一起載入。
  * 轉發會輸出成「原文＋repost（誰轉發）」；原文被刪或隱藏的轉發會略過。
  */
 export async function serializeMany(c: any, rows: any[]) {
@@ -406,12 +406,13 @@ api.post('/posts', async (c) => {
     if (!text) throw new HttpError(400, '引用轉發要寫點什麼；不想寫的話用「轉發」就好');
     quoteOf = q.id; quoteAuthor = q.user_id;
   }
-  // 發到社團：必須是成員
+  // 分類版：一般貼文一定要在某個分類版裡（沒選就放「暢所欲言」）；網誌與引用轉發可以不選
   let communityId: string | null = null;
-  if (b.community_id) {
-    const m = await c.env.DB.prepare('SELECT 1 FROM community_members WHERE community_id = ? AND user_id = ?').bind(String(b.community_id), u.id).first();
-    if (!m) throw new HttpError(403, '要先加入社團才能發文');
-    communityId = String(b.community_id);
+  if (b.community_id || (kind === 'post' && !quoteOf)) {
+    const want = String(b.community_id || DEFAULT_BOARD);
+    const cm = await c.env.DB.prepare('SELECT id FROM communities WHERE id = ?').bind(want).first<{ id: string }>();
+    if (!cm) throw new HttpError(400, '找不到這個分類版');
+    communityId = cm.id;
   }
   if (!text && !keys.length) throw new HttpError(400, '內容不能空白');
   const max = kind === 'blog' ? BLOG_MAX : POST_MAX;

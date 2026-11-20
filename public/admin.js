@@ -3,7 +3,7 @@
 
 async function adminPage(tab) {
   if (!S.me || S.me.role !== 'gm') { shell('', h('main', { class: 'main' }, h('div', { class: 'empty glass' }, '只有 GM 可以使用後台'))); return; }
-  const tabs = [['dashboard', '儀表板'], ['users', '用戶管理'], ['posts', '內容管理'], ['reports', '檢舉處理'], ['appeals', '申訴'], ['content', '✦ 內容帳號'], ['news', '新聞來源'], ['audit', '操作紀錄']];
+  const tabs = [['dashboard', '儀表板'], ['users', '用戶管理'], ['posts', '內容管理'], ['reports', '檢舉處理'], ['appeals', '申訴'], ['boards', '分類版'], ['content', '✦ 內容帳號'], ['news', '新聞來源'], ['audit', '操作紀錄']];
   const nav = h('nav', { 'aria-label': '後台選單' },
     h('a', { href: '/', style: 'margin-bottom:12px' }, '← 回到網站'),
     tabs.map(([k, l]) => h('a', { href: k === 'dashboard' ? '/admin' : `/admin/${k}`, class: tab === k ? 'active' : '' }, l)));
@@ -113,6 +113,36 @@ const ADMIN = {
           r.post_id ? h('button', { class: 'btn ghost small', onclick: () => act(r.id, 'mark_sensitive', r.reason) }, '標記敏感') : null, ' ',
           h('button', { class: 'btn ghost small', onclick: () => act(r.id, 'dismiss') }, '略過')] : '—')))) : h('div', { class: 'empty' }, '沒有檢舉')));
   },
+  async boards(main) {
+    const d = await api('GET', '/api/communities');
+    const GOPTS = [['', '不指定'], ['news', '時事帳號'], ['game', '遊戲帳號'], ['mixed', '綜合帳號'], ['fun', '趣事帳號']];
+    const form = (c) => {
+      const name = h('input', { maxlength: '20', value: c?.name || '', placeholder: '例如：美食' });
+      const slug = h('input', { maxlength: '24', value: c?.slug || '', placeholder: '例如：food', disabled: c ? true : null });
+      const icon_ = h('input', { maxlength: '4', value: c?.icon || '', placeholder: '🍜', style: 'width:80px' });
+      const desc = h('textarea', { rows: '2', maxlength: '200', placeholder: '這個分類版在聊什麼？' }); desc.value = c?.description || '';
+      const grp = h('select', null, GOPTS.map(([v, l]) => h('option', { value: v, selected: (c?.content_group || '') === v ? true : null }, l)));
+      const err = h('span', { class: 'err' });
+      const m = modal(c ? `編輯「${c.name}」` : '新增分類版',
+        h('label', { class: 'field' }, '名稱', name),
+        h('label', { class: 'field' }, '網址代號（英文小寫、數字、-；建立後不能改）', slug),
+        h('label', { class: 'field' }, '圖示（一個表情符號）', icon_),
+        h('label', { class: 'field' }, '介紹', desc),
+        h('label', { class: 'field' }, '哪一組 ✦ 帳號的文章發到這裡', grp), err,
+        h('button', { class: 'btn', onclick: async () => {
+          const body = { name: name.value, slug: slug.value, icon: icon_.value, description: desc.value, content_group: grp.value || null };
+          try { await api(c ? 'PATCH' : 'POST', c ? `/api/communities/${c.slug}` : '/api/communities', body); m.remove(); toast('已儲存'); ADMIN.boards(main); } catch (e) { err.textContent = e.message; }
+        } }, '儲存'));
+    };
+    main.replaceChildren(h('div', { class: 'row between' }, h('div', null, h('h1', null, '分類版'), h('span', { class: 'muted' }, '用戶不能自己開版，只能在這裡的分類版發文（沒選就放「暢所欲言」）。')), h('button', { class: 'btn', onclick: () => form(null) }, '＋ 新增分類版')),
+      h('section', { class: 'card glass' }, table(['分類版', '介紹', '✦ 帳號', '文章', ''], d.communities.map((c) => h('tr', null,
+        h('td', null, h('a', { href: `/c/${c.slug}` }, `${c.icon} ${c.name}`), h('br'), h('span', { class: 'muted' }, `/c/${c.slug}`)),
+        h('td', { class: 'muted', style: 'max-width:280px' }, c.description || '—'),
+        h('td', null, c.content_group ? h('span', { class: 'pill' }, GROUP[c.content_group]) : '—'),
+        h('td', null, c.post_count),
+        h('td', { style: 'white-space:nowrap' }, h('button', { class: 'btn ghost small', onclick: () => form(c) }, '編輯'), ' ',
+          c.id === 'cm_free' ? null : h('button', { class: 'btn danger small', onclick: async () => { if (!confirm(`刪除「${c.name}」？裡面的文章會移到「暢所欲言」。`)) return; try { await api('DELETE', `/api/communities/${c.slug}`); toast('已刪除'); ADMIN.boards(main); } catch (e) { toast(e.message); } } }, '刪除')))))));
+  },
   async appeals(main) {
     const st = new URLSearchParams(location.search).get('status') || 'pending';
     const d = await api('GET', `/api/admin/appeals?status=${st}`);
@@ -159,7 +189,7 @@ const ADMIN = {
     const neurons = d.posts_per_day * perPost * 1.2;
     const monthly = Math.max(0, neurons - 10000) * 0.011 / 1000 * 30;
     modelSel.addEventListener('change', () => set('ai_model', modelSel.value).then(() => { toast('已儲存'); ADMIN.content(main); }));
-    const cmSel = h('select', { 'aria-label': '發到官方社團的比例' }, [0, 10, 30, 50, 100].map((v) => h('option', { value: String(v), selected: String(v) === String(s.community_ratio ?? '30') ? true : null }, v ? `約 ${v}% 的貼文` : '不發到社團')));
+    const cmSel = h('select', { 'aria-label': '發到分類版的比例' }, [0, 30, 50, 100].map((v) => h('option', { value: String(v), selected: String(v) === String(s.community_ratio ?? '100') ? true : null }, v === 100 ? '全部發到分類版' : v ? `約 ${v}% 的貼文` : '不發到分類版')));
     cmSel.addEventListener('change', () => set('community_ratio', cmSel.value).then(() => toast('已儲存')));
     const ratioSel = h('select', { 'aria-label': '熱門動態牆中 ✦ 內容比例上限' }, [0, 20, 30, 50, 70, 100].map((v) => h('option', { value: String(v), selected: String(v) === String(s.feed_content_ratio ?? '50') ? true : null }, v === 100 ? '不限制' : `最多 ${v}%`)));
     ratioSel.addEventListener('change', () => set('feed_content_ratio', ratioSel.value).then(() => toast('已儲存')));
@@ -190,7 +220,7 @@ const ADMIN = {
           h('div', { class: 'field' }, '內容帳號互相按讚', sw(s.interact_like === '1', (v) => set('interact_like', v ? '1' : '0'), '互相按讚')),
           h('div', { class: 'field' }, '內容帳號互相留言', sw(s.interact_comment === '1', (v) => set('interact_comment', v ? '1' : '0'), '互相留言')),
           h('label', { class: 'field' }, '停用後的舊文', oldMode),
-          h('label', { class: 'field' }, '發到官方社團的比例', cmSel),
+          h('label', { class: 'field' }, '發到分類版的比例', cmSel),
           h('div', { class: 'field' }, '每日熱門投票（每天 10 點）', h('div', { class: 'row' }, sw(s.daily_poll !== '0', (v) => set('daily_poll', v ? '1' : '0'), '每日投票'),
             h('button', { class: 'btn ghost small', onclick: async () => { const r = await api('POST', '/api/admin/content/daily-poll'); toast(r.posted ? `已發布：${r.question}` : r.skipped); } }, '立刻發一題'))))),
       h('section', { class: 'card glass' },
@@ -221,7 +251,7 @@ const ADMIN = {
   },
   async audit(main) {
     const d = await api('GET', '/api/admin/audit');
-    const LABEL = { 'user_status:active': '恢復帳號', 'user_status:suspended': '停權', 'user_status:banned': '封鎖', 'user_role:gm': '設為 GM', 'user_role:user': '取消 GM', user_delete: '刪除帳號', post_hide: '隱藏文章', post_unhide: '取消隱藏', post_mark_sensitive: '標記敏感', post_delete: '刪除文章', report_hide: '檢舉：隱藏', report_mark_sensitive: '檢舉：標記敏感', report_dismiss: '檢舉：略過', content_account_edit: '編輯內容帳號', content_disable_all: '停用全部內容帳號', setting: '修改設定', appeal_accept: '申訴：接受', appeal_reject: '申訴：駁回', comment_delete: '刪除留言', community_delete: '刪除社團', daily_poll_now: '發每日投票' };
+    const LABEL = { 'user_status:active': '恢復帳號', 'user_status:suspended': '停權', 'user_status:banned': '封鎖', 'user_role:gm': '設為 GM', 'user_role:user': '取消 GM', user_delete: '刪除帳號', post_hide: '隱藏文章', post_unhide: '取消隱藏', post_mark_sensitive: '標記敏感', post_delete: '刪除文章', report_hide: '檢舉：隱藏', report_mark_sensitive: '檢舉：標記敏感', report_dismiss: '檢舉：略過', content_account_edit: '編輯內容帳號', content_disable_all: '停用全部內容帳號', setting: '修改設定', appeal_accept: '申訴：接受', appeal_reject: '申訴：駁回', comment_delete: '刪除留言', board_create: '新增分類版', board_edit: '編輯分類版', board_delete: '刪除分類版', daily_poll_now: '發每日投票' };
     main.replaceChildren(h('h1', null, '操作紀錄'), h('span', { class: 'muted' }, '所有 GM 的管理操作都會記錄在這裡（最近 200 筆）。'),
       h('section', { class: 'card glass' }, d.items.length ? table(['時間', 'GM', '動作', '對象', '說明'], d.items.map((x) => h('tr', null, h('td', null, fmt(x.created_at)), h('td', null, x.gm || '—'), h('td', null, LABEL[x.action] || x.action), h('td', { class: 'muted' }, x.target || '—'), h('td', { class: 'muted', style: 'max-width:260px' }, x.detail || '')))) : h('div', { class: 'empty' }, '還沒有紀錄')));
   },
