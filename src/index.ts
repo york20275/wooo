@@ -11,6 +11,18 @@ import { withOg } from './og';
 
 const app = new Hono<AppEnv>();
 
+// www.wootw.com、xxx.workers.dev 一律轉到正式網址（登入狀態才不會分散在不同網址）
+app.use('*', async (c, next) => {
+  if (c.env.DEV_MODE !== '1' && c.env.SITE_URL.startsWith('https://')) {
+    const url = new URL(c.req.url);
+    const site = new URL(c.env.SITE_URL);
+    if (url.host !== site.host && (url.host === `www.${site.host}` || url.host.endsWith('.workers.dev'))) {
+      return c.redirect(site.origin + url.pathname + url.search, 301);
+    }
+  }
+  await next();
+});
+
 // 載入登入者，並記錄每日活躍（10 分鐘內只記一次）
 app.use('*', async (c, next) => {
   const u = await loadUser(c.env, getCookie(c, 'sid'));

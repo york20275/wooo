@@ -74,16 +74,14 @@ if ($LASTEXITCODE -ne 0) { Fail "建立內容帳號失敗。" }
 
 Step "7/8 上線"
 $env:CI = $null
-Write-Host "第一次上線時，Cloudflare 可能會請你取一個 workers.dev 子網域名稱，照畫面輸入英文名稱即可。"
+$site = ([regex]::Match((Get-Content wrangler.toml -Raw), 'SITE_URL\s*=\s*"([^"]+)"')).Groups[1].Value
+$domain = ([uri]$site).Host
+Write-Host "網站會綁定 $domain（www.$domain 會自動轉過去）。"
+Write-Host "請先確認：Cloudflare 後台的網域列表裡，$domain 的狀態是「有效 / Active」。" -ForegroundColor Yellow
+Write-Host "（還在等名稱伺服器生效的話，先按 Ctrl+C 結束，等 Cloudflare 寄信通知生效後再執行一次 deploy.bat）"
+Read-Host "確認好後按 Enter 上線"
 npx wrangler deploy
-if ($LASTEXITCODE -ne 0) { Fail "上線失敗。" }
-$site = ''
-while ($site -notmatch '^https://[a-zA-Z0-9.-]+\.workers\.dev$') {
-  $site = (Read-Host "請複製上面顯示的網址（https://開頭、.workers.dev 結尾）貼上後按 Enter").Trim().TrimEnd('/')
-}
-SetToml 'SITE_URL' $site
-npx wrangler deploy
-if ($LASTEXITCODE -ne 0) { Fail "更新網址後重新上線失敗。" }
+if ($LASTEXITCODE -ne 0) { Fail "上線失敗。如果訊息提到網域（domain / zone），代表 $domain 還沒在 Cloudflare 生效，等生效後再執行一次。" }
 Write-Host "你的網站：$site" -ForegroundColor Cyan
 
 Step "推播通知金鑰"

@@ -3,6 +3,13 @@ main = "src/index.ts"
 compatibility_date = "2026-11-01"
 compatibility_flags = ["nodejs_compat"]
 
+# 自訂網域：部署時 Cloudflare 自動建立 DNS 與 SSL 憑證（網域必須先加進同一個 Cloudflare 帳號）
+# www.wootw.com 會自動轉到 wootw.com
+routes = [
+  { pattern = "wootw.com", custom_domain = true },
+  { pattern = "www.wootw.com", custom_domain = true },
+]
+
 # 前端靜態檔（public/），/api、/auth、/img 先交給 Worker 處理
 [assets]
 directory = "./public"
@@ -28,8 +35,8 @@ crons = ["* * * * *"]
 
 [vars]
 SITE_NAME = "窩Woo！"
-# 網站網址（Google 登入回呼用），上線後改成你的網域
-SITE_URL = "http://localhost:8787"
+# 網站網址（Google 登入回呼、分享連結用），不要結尾斜線
+SITE_URL = "https://wootw.com"
 # GM 管理員的 Gmail，多個用逗號分隔
 GM_EMAILS = ""
 # Workers AI 模型

@@ -51,8 +51,7 @@ npm run db:init           # 建立資料表＋450 個內容帳號
 1. 到 Google Cloud Console（console.cloud.google.com）建立一個專案。
 2. 「API 和服務」→「OAuth 同意畫面」：類型選「外部」，填網站名稱「窩Woo！」與你的 Email。
 3. 「憑證」→「建立憑證」→「OAuth 用戶端 ID」→ 類型「網頁應用程式」。
-4. 「已授權的重新導向 URI」填：`https://你的網域/auth/google/callback`
-   （還沒有網域的話，先部署一次拿到 `https://wooo.你的帳號.workers.dev`，再回來填）
+4. 「已授權的重新導向 URI」填：`https://wootw.com/auth/google/callback`
 5. 拿到「用戶端 ID」和「用戶端密鑰」：
 
 ```bash
@@ -63,7 +62,7 @@ npx wrangler secret put GOOGLE_CLIENT_SECRET
 ### 4. 修改 wrangler.toml 的設定
 
 ```toml
-SITE_URL = "https://你的網域"          # 不要結尾斜線，要跟 Google 填的一致
+SITE_URL = "https://wootw.com"         # 不要結尾斜線，要跟 Google 填的一致
 GM_EMAILS = "你的Gmail@gmail.com"      # GM 管理員，多個用逗號分隔
 DEV_MODE = "0"                         # 正式上線一定是 0
 ```
@@ -82,10 +81,19 @@ npm run deploy
 2. GM 後台 →「新聞來源」→ 貼上 API Key → 儲存 →「立刻抓新聞」。
 3. 想補充即時新聞，可以在同一頁加 RSS 網址（請使用允許轉載摘要與連結的來源）。
 
-### 7. 綁自己的網域（選用）
+### 7. 網域 wootw.com
 
-Cloudflare 後台 → Workers → wooo → 設定 → 網域與路由 → 新增自訂網域。
-綁好後記得改 `SITE_URL`，並回 Google Cloud 加上新的重新導向 URI，再部署一次。
+`wrangler.toml` 已經設定好 `wootw.com` 和 `www.wootw.com`（www 會自動轉到 wootw.com），部署時 Cloudflare 會自動建立 DNS 和 SSL 憑證，不用手動設定。
+
+前提：wootw.com 必須先加進**同一個** Cloudflare 帳號，而且狀態是「有效」：
+1. Cloudflare 後台 →「新增網域」→ 輸入 `wootw.com` → 選 Free 方案。
+2. Cloudflare 會給兩組名稱伺服器（`xxx.ns.cloudflare.com`）。
+3. 到買網域的地方（Spaceship）→ wootw.com →「名稱伺服器和DNS」→ 改成「自訂名稱伺服器」→ 貼上那兩組 → 儲存。
+4. 等 Cloudflare 寄信通知生效（通常幾分鐘到幾小時）。
+
+Google 登入的「已授權的重新導向 URI」填：`https://wootw.com/auth/google/callback`
+
+想換網域：改 `wrangler.toml` 裡的 `routes` 和 `SITE_URL`，Google Cloud 加上新的重新導向 URI，再部署一次。
 
 ### 8. 選用功能
 
