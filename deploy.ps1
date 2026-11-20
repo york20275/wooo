@@ -86,6 +86,13 @@ npx wrangler deploy
 if ($LASTEXITCODE -ne 0) { Fail "更新網址後重新上線失敗。" }
 Write-Host "你的網站：$site" -ForegroundColor Cyan
 
+Step "推播通知金鑰"
+$vk = (node scripts/gen-vapid.mjs | ConvertFrom-Json)
+$vk.public | npx wrangler secret put VAPID_PUBLIC_KEY
+$vk.private | npx wrangler secret put VAPID_PRIVATE_JWK
+SetToml 'VAPID_SUBJECT' ("mailto:" + $gm.Trim())
+npx wrangler deploy | Out-Null
+
 Step "8/8 設定 Google 登入"
 $cb = "$site/auth/google/callback"
 Set-Clipboard -Value $cb -ErrorAction SilentlyContinue

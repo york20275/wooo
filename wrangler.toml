@@ -8,7 +8,7 @@ compatibility_flags = ["nodejs_compat"]
 directory = "./public"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-run_worker_first = ["/api/*", "/auth/*", "/img/*"]
+run_worker_first = ["/api/*", "/auth/*", "/img/*", "/p/*", "/u/*", "/album/*", "/tag/*"]
 
 [[d1_databases]]
 binding = "DB"
@@ -34,8 +34,17 @@ SITE_URL = "http://localhost:8787"
 GM_EMAILS = ""
 # Workers AI 模型
 AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+# Cloudflare Turnstile 人機驗證的 Site Key（選用；搭配 secret TURNSTILE_SECRET）
+TURNSTILE_SITEKEY = ""
+# 推播通知的聯絡信箱（VAPID），例如 mailto:you@gmail.com
+VAPID_SUBJECT = ""
 # 本機測試用：1 = 開啟免 Google 的測試登入與測試年齡驗證。正式上線一定要是 0
 DEV_MODE = "0"
 
 # 以下用 wrangler secret put 設定，不要寫在這個檔案：
 # GOOGLE_CLIENT_ID、GOOGLE_CLIENT_SECRET、NEWSDATA_API_KEY（也可在後台設定）
+# TURNSTILE_SECRET（選用）、VAPID_PUBLIC_KEY、VAPID_PRIVATE_JWK（推播，用 node scripts/gen-vapid.mjs 產生）
+
+# 錯誤監控與紀錄（Cloudflare 後台 → Workers → wooo → Observability 查看）
+[observability]
+enabled = true

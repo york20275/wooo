@@ -11,6 +11,11 @@ export interface Env {
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   NEWSDATA_API_KEY?: string;
+  TURNSTILE_SITEKEY?: string;
+  TURNSTILE_SECRET?: string;
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_JWK?: string;
+  VAPID_SUBJECT?: string;
 }
 
 export interface User {
@@ -31,6 +36,13 @@ export interface User {
   age_verified: number;
   show_sensitive: number;
   theme: string;
+  banner_key: string | null;
+  accent: string | null;
+  pinned_post_id: string | null;
+  interests: string;
+  onboarded: number;
+  human_verified: number;
+  last_seen_at: number | null;
   created_at: number;
 }
 
@@ -73,4 +85,28 @@ export async function logContent(db: D1Database, kind: string, accountId: string
 /** 這位觀看者能不能看敏感內容：必須登入、已完成年齡驗證、並自己開啟 */
 export function canSeeSensitive(u: User | null): boolean {
   return !!u && u.age_verified === 1 && u.show_sensitive === 1;
+}
+
+/** 台灣日期 YYYY-MM-DD */
+export function twDay(t = Date.now()): string {
+  return new Date(t + 8 * 3600_000).toISOString().slice(0, 10);
+}
+
+export const imgUrl = (key: string | null | undefined) => (key ? `/img/${key}` : null);
+
+/** 從文字中找出 @帳號 */
+export function findMentions(text: string): string[] {
+  const out = new Set<string>();
+  for (const m of text.matchAll(/@([a-zA-Z0-9_]{3,30})/g)) out.add(m[1].toLowerCase());
+  return [...out].slice(0, 10);
+}
+
+/** 兩人之間是否有任一方封鎖對方 */
+export async function isBlockedEither(db: D1Database, a: string, b: string): Promise<boolean> {
+  const r = await db.prepare("SELECT 1 FROM blocks WHERE kind = 'block' AND ((blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)) LIMIT 1").bind(a, b, b, a).first();
+  return !!r;
+}
+
+export async function logAudit(db: D1Database, gmId: string, action: string, target: string | null, detail = '') {
+  await db.prepare('INSERT INTO audit_log (id, gm_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(newId(), gmId, action, target, detail.slice(0, 300), now()).run();
 }

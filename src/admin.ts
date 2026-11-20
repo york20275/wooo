@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import type { AppEnv, User } from './env';
-import { getSettings, newId, now, setSetting } from './env';
+import { getSettings, logAudit, now, setSetting, twDay } from './env';
 import { HttpError, deletePost } from './api';
+import { deleteUserData } from './social';
 import { runPostTick, fetchNews } from './content';
 
 export const admin = new Hono<AppEnv>();
@@ -62,6 +63,28 @@ admin.post('/users/:id/status', async (c) => {
   if (c.req.param('id') === me.id) throw new HttpError(400, '不能變更自己的狀態');
   await c.env.DB.prepare('UPDATE users SET status = ? WHERE id = ? AND is_content = 0').bind(b.status, c.req.param('id')).run();
   if (b.status === 'banned') await c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(c.req.param('id')).run();
+  await logAudit(c.env.DB, me.id, `user_status:${b.status}`, c.req.param('id'));
+  return c.json({ ok: true });
+});
+
+admin.post('/users/:id/role', async (c) => {
+  const b = await c.req.json<any>();
+  const me = c.get('user')!;
+  if (!['user', 'gm'].includes(b.role)) throw new HttpError(400, '角色不正確');
+  if (c.req.param('id') === me.id) throw new HttpError(400, '不能變更自己的角色');
+  await c.env.DB.prepare('UPDATE users SET role = ? WHERE id = ? AND is_content = 0').bind(b.role, c.req.param('id')).run();
+  await logAudit(c.env.DB, me.id, `user_role:${b.role}`, c.req.param('id'));
+  return c.json({ ok: true });
+});
+
+/** GM 刪除帳號（例如違法內容），會刪除該用戶所有資料 */
+admin.delete('/users/:id', async (c) => {
+  const me = c.get('user')!;
+  const t = await c.env.DB.prepare('SELECT id, handle, role, is_content FROM users WHERE id = ?').bind(c.req.param('id')).first<any>();
+  if (!t || t.is_content) throw new HttpError(404, '找不到這位用戶');
+  if (t.id === me.id || t.role === 'gm') throw new HttpError(400, '不能刪除 GM 帳號');
+  await deleteUserData(c.env, t.id);
+  await logAudit(c.env.DB, me.id, 'user_delete', t.id, `@${t.handle}`);
   return c.json({ ok: true });
 });
 
@@ -80,6 +103,7 @@ admin.get('/posts', async (c) => {
 admin.post('/posts/:id', async (c) => {
   const b = await c.req.json<any>();
   const id = c.req.param('id');
+  await logAudit(c.env.DB, c.get('user')!.id, `post_${b.action}`, id);
   if (b.action === 'hide') await c.env.DB.prepare('UPDATE posts SET hidden = 1 WHERE id = ?').bind(id).run();
   else if (b.action === 'unhide') await c.env.DB.prepare('UPDATE posts SET hidden = 0 WHERE id = ?').bind(id).run();
   else if (b.action === 'mark_sensitive') await c.env.DB.prepare('UPDATE posts SET sensitive = 1 WHERE id = ?').bind(id).run();
@@ -112,6 +136,7 @@ admin.post('/reports/:id', async (c) => {
   if (b.action === 'hide' && r.comment_id) await c.env.DB.prepare('UPDATE comments SET hidden = 1 WHERE id = ?').bind(r.comment_id).run();
   if (b.action === 'mark_sensitive' && r.post_id) await c.env.DB.prepare('UPDATE posts SET sensitive = 1 WHERE id = ?').bind(r.post_id).run();
   const status = b.action === 'dismiss' ? 'dismissed' : 'resolved';
+  await logAudit(c.env.DB, me.id, `report_${b.action}`, r.post_id || r.comment_id, r.reason);
   // 同一個對象的其他未處理檢舉一起結案
   await c.env.DB.prepare(
     "UPDATE reports SET status = ?, resolved_by = ?, resolved_at = ? WHERE status = 'open' AND IFNULL(post_id,'') = ? AND IFNULL(comment_id,'') = ?"
@@ -149,6 +174,7 @@ admin.patch('/content/:id', async (c) => {
   if (typeof b.persona === 'string') { sets.push('persona = ?'); vals.push(b.persona.slice(0, 300)); }
   if (typeof b.name === 'string' && b.name.trim()) { sets.push('name = ?'); vals.push(b.name.trim().slice(0, 40)); }
   if (sets.length) await c.env.DB.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ? AND is_content = 1`).bind(...vals, c.req.param('id')).run();
+  await logAudit(c.env.DB, c.get('user')!.id, 'content_account_edit', c.req.param('id'), JSON.stringify(b).slice(0, 200));
   return c.json({ ok: true });
 });
 
@@ -165,6 +191,7 @@ admin.patch('/settings', async (c) => {
       val = JSON.stringify(list);
     }
     await setSetting(c.env.DB, k, val);
+    await logAudit(c.env.DB, c.get('user')!.id, 'setting', k, k === 'newsdata_key' ? '（已更新）' : val);
   }
   return c.json({ ok: true });
 });
@@ -172,6 +199,7 @@ admin.patch('/settings', async (c) => {
 /** 一鍵停用全部：關閉總開關（個別帳號的設定保留，之後打開總開關就恢復） */
 admin.post('/content/disable-all', async (c) => {
   await setSetting(c.env.DB, 'content_enabled', '0');
+  await logAudit(c.env.DB, c.get('user')!.id, 'content_disable_all', null);
   return c.json({ ok: true });
 });
 
@@ -196,4 +224,31 @@ admin.post('/content/fetch-news', async (c) => {
 admin.get('/news', async (c) => {
   const r = await c.env.DB.prepare('SELECT url, title, source, used, fetched_at FROM news_cache ORDER BY fetched_at DESC LIMIT 50').all();
   return c.json({ news: r.results });
+});
+
+// ---------- 統計與操作紀錄 ----------
+admin.get('/stats', async (c) => {
+  const days = Math.min(60, Math.max(7, Number(c.req.query('days') || 14)));
+  const out: any[] = [];
+  const db = c.env.DB;
+  for (let i = days - 1; i >= 0; i--) {
+    const day = twDay(Date.now() - i * 86400_000);
+    const start = Date.parse(day + 'T00:00:00+08:00');
+    const end = start + 86400_000;
+    const [nu, rp, cp, au] = await Promise.all([
+      db.prepare('SELECT COUNT(*) AS n FROM users WHERE is_content = 0 AND created_at >= ? AND created_at < ?').bind(start, end).first<{ n: number }>(),
+      db.prepare("SELECT COUNT(*) AS n FROM posts WHERE source = 'user' AND created_at >= ? AND created_at < ?").bind(start, end).first<{ n: number }>(),
+      db.prepare("SELECT COUNT(*) AS n FROM posts WHERE source = 'content' AND created_at >= ? AND created_at < ?").bind(start, end).first<{ n: number }>(),
+      db.prepare('SELECT COUNT(*) AS n FROM daily_active WHERE day = ?').bind(day).first<{ n: number }>(),
+    ]);
+    out.push({ day, new_users: nu?.n ?? 0, real_posts: rp?.n ?? 0, content_posts: cp?.n ?? 0, active_users: au?.n ?? 0 });
+  }
+  return c.json({ days: out });
+});
+
+admin.get('/audit', async (c) => {
+  const r = await c.env.DB.prepare(
+    'SELECT a.action, a.target, a.detail, a.created_at, u.name AS gm FROM audit_log a LEFT JOIN users u ON u.id = a.gm_id ORDER BY a.created_at DESC LIMIT 200'
+  ).all();
+  return c.json({ items: r.results });
 });

@@ -133,6 +133,15 @@ export async function handleCron(env: Env, cron: string) {
     await runInteractTick(env);
     // 每小時抓一次新聞（整點後第一個 10 分鐘）
     const m = new Date().getUTCMinutes();
-    if (m < 10) await fetchNewsImpl(env);
+    if (m < 10) {
+      await fetchNewsImpl(env);
+      // 清理：兩天前的訪客紀錄、過期的登入、90 天前的每日活躍與內容紀錄
+      await env.DB.batch([
+        env.DB.prepare('DELETE FROM profile_visits WHERE day < ?').bind(new Date(Date.now() - 2 * 86400_000 + 8 * 3600_000).toISOString().slice(0, 10)),
+        env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(now()),
+        env.DB.prepare('DELETE FROM daily_active WHERE day < ?').bind(new Date(Date.now() - 90 * 86400_000 + 8 * 3600_000).toISOString().slice(0, 10)),
+        env.DB.prepare('DELETE FROM content_log WHERE created_at < ?').bind(now() - 30 * 86400_000),
+      ]);
+    }
   }
 }

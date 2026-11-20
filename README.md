@@ -4,12 +4,17 @@ Cloudflare Workers + D1 資料庫 + R2 圖片儲存 + Workers AI。前期幾乎�
 
 ## 功能
 
-- Google 登入、個人頁、追蹤、通知、搜尋、今日話題（#標籤）
-- 發文（文字＋圖片，瀏覽器自動縮圖轉 WebP）、按讚、留言、檢舉
+- Google 登入、新手引導（選興趣、推薦追蹤）、個人頁、追蹤、通知、搜尋、今日話題、#標籤頁、@提及
+- 發文（文字＋圖片，瀏覽器自動縮圖轉 WebP）、按讚、留言與回覆串、檢舉
+- 無名小站風格：網誌長文、相簿、訪客計數（今日／總計）、個人頁橫幅與主題色、置頂文章
+- 私訊、封鎖、靜音
+- 加到手機主畫面（PWA）、推播通知、分享到 LINE／臉書時顯示標題與圖片
+- 個資：下載我的資料、刪除帳號、隱私權政策與使用條款（範本）
+- 防機器人：新帳號 3 天內第一次發文前要通過 Cloudflare Turnstile（選用）
 - 9 種配色（預設「森林晴空」）、卡片透明度、文字大小
 - 敏感內容：發文者自行標記、圖片模糊、預設關閉、需年齡驗證才能開啟；熱門、大頭貼、未登入頁面一律不出現
 - ✦ 平台內容帳號 150 個（時事／遊戲／綜合各 50），全站每 30 分鐘一則，AI 撰寫；時事接 NewsData.io＋RSS，附原文連結
-- GM 後台：儀表板、用戶管理、內容管理、檢舉處理、✦ 內容帳號（總開關、分組開關、間隔、互動、停用後舊文）、新聞來源
+- GM 後台：儀表板（近 14 天圖表）、用戶管理（停權、封鎖、設為 GM、刪除帳號）、內容管理、檢舉處理、✦ 內容帳號、新聞來源、操作紀錄
 
 ---
 
@@ -82,6 +87,25 @@ npm run deploy
 Cloudflare 後台 → Workers → wooo → 設定 → 網域與路由 → 新增自訂網域。
 綁好後記得改 `SITE_URL`，並回 Google Cloud 加上新的重新導向 URI，再部署一次。
 
+### 8. 選用功能
+
+**推播通知**：`deploy.bat` 會自動產生金鑰。手動設定的話：
+```bash
+node scripts/gen-vapid.mjs        # 會印出 public 和 private 兩個值
+npx wrangler secret put VAPID_PUBLIC_KEY      # 貼上 public
+npx wrangler secret put VAPID_PRIVATE_JWK     # 貼上 private（整段 JSON）
+```
+並在 `wrangler.toml` 填 `VAPID_SUBJECT = "mailto:你的信箱"`。iPhone 需要先「加入主畫面」才能收推播。
+
+**防機器人（Cloudflare Turnstile）**：Cloudflare 後台 → Turnstile → 新增網站，拿到 Site Key 與 Secret Key：
+`wrangler.toml` 填 `TURNSTILE_SITEKEY`，再執行 `npx wrangler secret put TURNSTILE_SECRET`。沒設定就不啟用。
+
+**兒少性剝削圖片掃描（強烈建議）**：綁好自訂網域後，到 Cloudflare 後台 → 你的網域 → Caching → Configuration → 開啟「CSAM Scanning Tool」（免費，需要填寫通報用的聯絡信箱）。掃描到的圖片 Cloudflare 會封鎖並通知你。
+
+**錯誤監控**：已在 `wrangler.toml` 開啟 `[observability]`，到 Cloudflare 後台 → Workers → wooo → Observability 就能看到錯誤與紀錄。
+
+**年齡驗證**：見下方「上線前必做」。
+
 ---
 
 ## 本機測試
@@ -116,8 +140,9 @@ AI 模型在 `wrangler.toml` 的 `AI_MODEL` 改。Workers AI 有每日免費額�
 ## 上線前必做
 
 - [ ] **年齡驗證**：`src/api.ts` 的 `/age/verify` 目前在正式環境會回「尚未開通」。要開放敏感內容，必須串接第三方年齡驗證服務（信用卡或身分證件），驗證成功才把 `age_verified` 設為 1。在那之前，敏感內容只能發、別人看不到。
-- [ ] 隱私權政策與使用條款頁面（個資法要求），可以請律師看過。
+- [ ] 隱私權政策與使用條款（`/privacy`、`/terms`）目前是範本，請把 [營運者名稱]、[聯絡 Email]、[管轄法院]、[日期] 換成實際資料，並請律師看過。內容在 `public/app.js` 的 `privacyPage()`、`termsPage()`。
 - [ ] 敏感內容的隔絕機制請熟悉網路法的律師確認（台灣法院曾認定只靠自填生日不算合格的隔絕措施）。
+- [ ] 敏感圖片：圖片網址是公開的（跟 Threads 一樣，模糊只在畫面上），拿到網址的人可以直接看到。這是刻意的選擇，若之後要加強，可以改成伺服器端檢查年齡驗證才給圖。
 - [ ] 商標：「Wooo」與第 45 類已註冊的 WOO、WOOTALK 近似，正式使用或註冊前請商標代理人確認。
 - [ ] `DEV_MODE = "0"`。
 
@@ -134,5 +159,11 @@ src/admin.ts                GM 後台 API
 src/content.ts              內容帳號排程（發文、互動）
 src/news.ts                 NewsData.io＋RSS
 src/ai.ts                   Workers AI 與寫作規則
-public/                     前端（index.html、app.js、style.css，不需要建置）
+src/social.ts               封鎖、私訊、相簿、訪客計數、新手引導、推播訂閱、匯出與刪除帳號
+src/notify.ts               通知＋推播
+src/push.ts                 Web Push 加密（RFC 8291）與 VAPID
+src/og.ts                   分享預覽（LINE／臉書）
+public/                     前端（index.html、app.js、admin.js、style.css、sw.js，不需要建置）
+scripts/gen-vapid.mjs       產生推播金鑰
+scripts/gen-icons.py        產生 App 圖示與分享預覽圖
 ```
