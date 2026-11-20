@@ -22,9 +22,9 @@ bucket_name = "wooo-images"
 [ai]
 binding = "AI"
 
-# 每 30 分鐘發文排程；每 10 分鐘互動與抓新聞
+# 每分鐘檢查一次：到時間的內容帳號發文、互動；每 30 分鐘抓新聞
 [triggers]
-crons = ["*/30 * * * *", "*/10 * * * *"]
+crons = ["* * * * *"]
 
 [vars]
 SITE_NAME = "窩Woo！"

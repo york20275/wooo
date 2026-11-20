@@ -13,7 +13,9 @@ async function adminPage(tab) {
 }
 const fmt = (t) => (t ? new Date(t).toLocaleString('zh-TW', { hour12: false }) : '—');
 const REASON = { spam: '垃圾訊息', harassment: '騷擾', copyright: '侵權', unmarked_sensitive: '未標記敏感內容', illegal: '違法內容', other: '其他' };
-const GROUP = { news: '時事', game: '遊戲', mixed: '綜合' };
+const GROUP = { news: '時事', game: '遊戲', mixed: '綜合', fun: '趣事' };
+const INTERVALS = [[30, '30 分鐘'], [60, '1 小時'], [120, '2 小時'], [240, '4 小時'], [480, '8 小時'], [720, '12 小時'], [1440, '1 天'], [2880, '2 天'], [4500, '約 3 天'], [10080, '7 天']];
+const MODELS = [['@cf/meta/llama-3.3-70b-instruct-fp8-fast', 'Llama 3.3 70B（品質最好）', 40], ['@cf/meta/llama-4-scout-17b-16e-instruct', 'Llama 4 Scout 17B（中等）', 20], ['@cf/meta/llama-3.1-8b-instruct-fp8-fast', 'Llama 3.1 8B（最便宜，中文較普通）', 7]];
 function table(cols, rows) {
   return h('div', { class: 'tablewrap' }, h('table', null, h('thead', null, h('tr', null, cols.map((c) => h('th', { scope: 'col' }, c)))), h('tbody', null, rows)));
 }
@@ -44,7 +46,7 @@ const ADMIN = {
         barChart(st.days, [{ key: 'active_users', label: '活躍用戶', color: '#2E6A4E' }, { key: 'new_users', label: '新用戶', color: '#2F74AE' }]),
         barChart(st.days, [{ key: 'real_posts', label: '真人發文', color: '#2E6A4E' }, { key: 'content_posts', label: '✦ 發文', color: '#A8CFF2' }])),
       h('section', { class: 'card glass' }, h('div', { class: 'row between wrap' },
-        h('div', null, h('h2', null, '✦ 內容帳號自動發文'), h('span', { class: 'muted' }, `${d.content.enabled_accounts} 個帳號啟用中 · 每 ${d.content.interval_min} 分鐘一則${paused ? ` · 暫停到 ${fmt(d.content.paused_until)}` : ''}`)),
+        h('div', null, h('h2', null, '✦ 內容帳號自動發文'), h('span', { class: 'muted' }, `${d.content.enabled_accounts} 個帳號啟用中 · 預估每天 ${d.content.posts_per_day} 則${paused ? ` · 暫停到 ${fmt(d.content.paused_until)}` : ''}`)),
         h('div', { class: 'row wrap' },
           h('button', { class: 'btn ghost small', onclick: async () => { await api('PATCH', '/api/admin/settings', { paused_until: paused ? 0 : Date.now() + 3600_000 }); navigate('/admin', true); } }, paused ? '取消暫停' : '暫停 1 小時'),
           h('a', { class: 'btn ghost small', href: '/admin/content' }, '前往設定'),
@@ -102,30 +104,44 @@ const ADMIN = {
     const d = await api('GET', `/api/admin/content${g ? `?group=${g}` : ''}`);
     const s = d.settings;
     const set = (k, v) => api('PATCH', '/api/admin/settings', { [k]: v });
-    const counts = { news: 0, game: 0, mixed: 0 };
-    if (!g) for (const a of d.accounts) counts[a.content_group]++;
-    const groupCard = (k) => h('section', { class: 'card glass' }, h('div', { class: 'row between' }, h('h2', null, GROUP[k]), sw(s[`group_${k}`] !== '0', (v) => api('POST', `/api/admin/content/group/${k}`, { enabled: v }), `${GROUP[k]}分組開關`)),
-      h('span', { class: 'muted' }, `${g ? '' : counts[k] + ' 個帳號 · '}今日已發 ${d.today[k] || 0} 則`));
-    const interval = h('select', { 'aria-label': '發文間隔' }, [['30', '每 30 分鐘'], ['60', '每 1 小時'], ['120', '每 2 小時']].map(([v, l]) => h('option', { value: v, selected: s.interval_min === v ? true : null }, l)));
-    interval.addEventListener('change', () => set('interval_min', interval.value).then(() => toast('已儲存')));
+    const groupCard = (k) => {
+      const cur = Number(s[`interval_${k}`] || 4500);
+      const opts = INTERVALS.some(([v]) => v === cur) ? INTERVALS : [...INTERVALS, [cur, `${cur} 分鐘`]];
+      const sel = h('select', { 'aria-label': `${GROUP[k]}每個帳號多久發一則` }, opts.map(([v, l]) => h('option', { value: String(v), selected: v === cur ? true : null }, `每 ${l} 一則`)));
+      sel.addEventListener('change', () => set(`interval_${k}`, sel.value).then(() => { toast('已儲存'); ADMIN.content(main); }));
+      const info = d.groups[k] || { total: 0, enabled: 0 };
+      return h('section', { class: 'card glass' }, h('div', { class: 'row between' }, h('h2', null, GROUP[k]), sw(s[`group_${k}`] !== '0', (v) => api('POST', `/api/admin/content/group/${k}`, { enabled: v }).then(() => ADMIN.content(main)), `${GROUP[k]}分組開關`)),
+        h('span', { class: 'muted' }, `${info.enabled}／${info.total} 個帳號啟用 · 今日已發 ${d.today[k] || 0} 則`), h('label', { class: 'field' }, '每個帳號平均', sel));
+    };
+    const curModel = s.ai_model || d.default_model;
+    const modelSel = h('select', { 'aria-label': 'AI 模型' }, MODELS.map(([v, l]) => h('option', { value: v, selected: v === curModel ? true : null }, l)));
+    const perPost = (MODELS.find(([v]) => v === curModel) || MODELS[0])[2];
+    const neurons = d.posts_per_day * perPost * 1.2;
+    const monthly = Math.max(0, neurons - 10000) * 0.011 / 1000 * 30;
+    modelSel.addEventListener('change', () => set('ai_model', modelSel.value).then(() => { toast('已儲存'); ADMIN.content(main); }));
+    const ratioSel = h('select', { 'aria-label': '熱門動態牆中 ✦ 內容比例上限' }, [0, 20, 30, 50, 70, 100].map((v) => h('option', { value: String(v), selected: String(v) === String(s.feed_content_ratio ?? '50') ? true : null }, v === 100 ? '不限制' : `最多 ${v}%`)));
+    ratioSel.addEventListener('change', () => set('feed_content_ratio', ratioSel.value).then(() => toast('已儲存')));
     const oldMode = h('select', { 'aria-label': '停用後的舊文' }, [['keep', '保留顯示'], ['hide', '全部隱藏']].map(([v, l]) => h('option', { value: v, selected: s.old_posts_mode === v ? true : null }, l)));
     oldMode.addEventListener('change', () => set('old_posts_mode', oldMode.value).then(() => toast('已儲存')));
     const f = (v, l) => h('button', { class: g === v ? 'on' : '', onclick: () => navigate(`/admin/content${v ? `?group=${v}` : ''}`) }, l);
     main.replaceChildren(
-      h('div', { class: 'row between wrap' }, h('div', null, h('h1', null, '✦ 內容帳號'), h('span', { class: 'muted' }, '全站依間隔輪流發文，同一帳號約 3 天輪到一次')),
+      h('div', { class: 'row between wrap' }, h('div', null, h('h1', null, '✦ 內容帳號'), h('span', { class: 'muted' }, `每個帳號依分組設定的間隔各自發文 · 目前預估每天 ${d.posts_per_day} 則`)),
         h('div', { class: 'row wrap' },
           h('span', { class: 'row' }, '總開關', sw(s.content_enabled === '1', (v) => set('content_enabled', v ? '1' : '0'), '自動發文總開關')),
           h('button', { class: 'btn ghost small', onclick: async () => { const r = await api('POST', '/api/admin/content/run-now'); toast(r.posted ? `${r.account} 已發文` : `未發文：${r.skipped}`); ADMIN.content(main); } }, '立刻發一則'),
           h('button', { class: 'btn danger small', onclick: async () => { if (!confirm('確定停用全部內容帳號？')) return; await api('POST', '/api/admin/content/disable-all'); toast('已全部停用'); ADMIN.content(main); } }, '一鍵停用全部'))),
-      h('div', { class: 'groups' }, groupCard('news'), groupCard('game'), groupCard('mixed')),
+      h('div', { class: 'groups four' }, groupCard('news'), groupCard('game'), groupCard('mixed'), groupCard('fun')),
+      h('section', { class: 'card glass' }, h('h2', null, 'AI 模型與費用'),
+        h('div', { class: 'groups' }, h('label', { class: 'field' }, 'AI 模型', modelSel),
+          h('div', { class: 'field' }, '預估 AI 費用', h('b', { style: 'font-size:20px' }, monthly < 0.5 ? '免費額度內' : `約 US$${monthly.toFixed(0)}／月`), h('span', { class: 'muted' }, `每天約 ${Math.round(neurons).toLocaleString()} neurons，免費 10,000／天，超過每 1,000 收 US$0.011。另需 Workers 付費方案 US$5／月。`)))),
       h('section', { class: 'card glass' }, h('h2', null, '發文與互動設定'),
         h('div', { class: 'groups' },
-          h('label', { class: 'field' }, '發文間隔', interval),
+          h('label', { class: 'field' }, '熱門動態牆 ✦ 比例上限', ratioSel),
           h('div', { class: 'field' }, '內容帳號互相按讚', sw(s.interact_like === '1', (v) => set('interact_like', v ? '1' : '0'), '互相按讚')),
           h('div', { class: 'field' }, '內容帳號互相留言', sw(s.interact_comment === '1', (v) => set('interact_comment', v ? '1' : '0'), '互相留言')),
           h('label', { class: 'field' }, '停用後的舊文', oldMode))),
       h('section', { class: 'card glass' },
-        h('div', { class: 'tabs' }, f('', '全部'), f('news', '時事'), f('game', '遊戲'), f('mixed', '綜合')),
+        h('div', { class: 'tabs' }, f('', '全部'), f('news', '時事'), f('game', '遊戲'), f('mixed', '綜合'), f('fun', '趣事')),
         table(['帳號', '分組', '個性／主題', '文章', '上次發文', '啟用', ''], d.accounts.map((a) => h('tr', null,
           h('td', null, h('a', { href: `/u/${a.handle}` }, a.name, ' ✦'), h('br'), h('span', { class: 'muted' }, `@${a.handle}`)),
           h('td', null, h('span', { class: 'pill' }, GROUP[a.content_group])), h('td', { style: 'max-width:280px', class: 'muted' }, a.persona),

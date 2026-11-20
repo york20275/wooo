@@ -35,6 +35,25 @@ const POST_COLS = `p.id, p.text, p.title, p.kind, p.image_key, p.link_url, p.lin
   p.like_count, p.comment_count, p.created_at,
   u.id AS author_id, u.name AS author_name, u.handle AS author_handle, u.avatar_key AS author_avatar, u.is_content AS author_is_content`;
 
+/**
+ * 依排名順序合併，但 ✦ 內容在任何位置之前都不超過 ratio 比例；
+ * 真人貼文不夠時，剩下的 ✦ 內容接在後面（網站剛起步時動態牆才不會空）。
+ */
+export function mixContent<T extends { source: string }>(ranked: T[], ratio: number): T[] {
+  const out: T[] = [];
+  const waiting: T[] = [];
+  let nc = 0;
+  const allowed = () => nc < Math.ceil((out.length + 1) * ratio);
+  for (const x of ranked) {
+    if (x.source !== 'content') {
+      out.push(x);
+      while (waiting.length && allowed()) { out.push(waiting.shift()!); nc++; }
+    } else if (allowed() && !waiting.length) { out.push(x); nc++; }
+    else waiting.push(x);
+  }
+  return out.concat(waiting);
+}
+
 export function serializePost(r: any, likedSet?: Set<string>) {
   return {
     id: r.id,
@@ -186,15 +205,19 @@ api.get('/feed', async (c) => {
     const [vis, vb] = await visibility(c, { forHot: true });
     const r = await c.env.DB.prepare(
       `SELECT ${POST_COLS}, p.real_like_count FROM posts p JOIN users u ON u.id = p.user_id
-       WHERE ${vis} AND p.created_at > ? ORDER BY p.created_at DESC LIMIT 300`
-    ).bind(...vb, now() - 3 * 86400_000).all();
+       WHERE ${vis} AND p.created_at > ? ORDER BY p.created_at DESC LIMIT 600`
+    ).bind(...vb, now() - 2 * 86400_000).all();
     const t = now();
-    rows = r.results
+    const ranked = r.results
       .map((x: any) => ({ x, s: (x.real_like_count + 1) / Math.pow((t - x.created_at) / 3600_000 + 2, 1.5) }))
       .sort((a, b) => b.s - a.s)
       .map((y) => y.x);
+    // ✦ 內容帳號的貼文最多只能佔熱門動態牆的一定比例，避免把真人的文洗掉
+    const ratio = Math.min(100, Math.max(0, Number(await getSetting(c.env.DB, 'feed_content_ratio', '50')))) / 100;
+    rows = mixContent(ranked, ratio);
+    const mixed = rows;
     const offset = Number(c.req.query('offset') || 0);
-    rows = rows.slice(offset, offset + 20);
+    rows = mixed.slice(offset, offset + 20);
   }
   const liked = await likedSetFor(c, rows.map((r) => r.id));
   return c.json({ posts: rows.map((r) => serializePost(r, liked)) });

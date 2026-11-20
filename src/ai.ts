@@ -1,9 +1,9 @@
 import type { Env } from './env';
 
 /** 用 Workers AI 生成文字；失敗時回傳 null，由呼叫端改用備用模板 */
-export async function generate(env: Env, system: string, prompt: string, maxTokens = 320): Promise<string | null> {
+export async function generate(env: Env, system: string, prompt: string, maxTokens = 320, model?: string): Promise<string | null> {
   try {
-    const res: any = await env.AI.run(env.AI_MODEL as any, {
+    const res: any = await env.AI.run((model || env.AI_MODEL) as any, {
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: prompt },
@@ -36,6 +36,6 @@ export const BASE_RULES = `你在社群平台「窩Woo！」經營一個「平�
 規則：
 - 用台灣繁體中文、自然口語，像一般人在社群上發文。
 - 不要提到你是 AI，不要加引號、標題或 Markdown。
-- 不要捏造具體的數字、人名、日期、事件或新聞。
+- 不要捏造新聞、統計數字，也不要提到真實的人名、店名或品牌；生活小故事可以是虛構的日常情境。
 - 不寫與性有關、暴力血腥、仇恨歧視的內容；不給醫療、法律或投資建議；不表達政治立場。
 - 星座、塔羅、算命類內容只當作輕鬆娛樂。`;

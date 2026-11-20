@@ -33,12 +33,14 @@ admin.get('/dashboard', async (c) => {
   ]);
   const s = await getSettings(db);
   const enabledAccounts = await q('SELECT COUNT(*) AS n FROM users WHERE is_content = 1 AND content_enabled = 1');
+  const byGroup = await db.prepare('SELECT content_group AS g, COUNT(*) AS n FROM users WHERE is_content = 1 AND content_enabled = 1 GROUP BY content_group').all<{ g: string; n: number }>();
+  const perDay = byGroup.results.reduce((sum, r) => sum + (s[`group_${r.g}`] === '0' ? 0 : (r.n * 1440) / Math.max(10, Number(s[`interval_${r.g}`] || 4500))), 0);
   const latest = await db.prepare(
     "SELECT id, name, handle, avatar_key, created_at FROM users WHERE is_content = 0 ORDER BY created_at DESC LIMIT 6"
   ).all();
   return c.json({
     stats: { newUsers, realPosts, contentPosts, openReports, totalUsers },
-    content: { enabled: s.content_enabled === '1', paused_until: Number(s.paused_until || 0), interval_min: Number(s.interval_min || 30), enabled_accounts: enabledAccounts },
+    content: { enabled: s.content_enabled === '1', paused_until: Number(s.paused_until || 0), posts_per_day: Math.round(perDay), enabled_accounts: enabledAccounts },
     latest_users: latest.results,
   });
 });
@@ -158,10 +160,16 @@ admin.get('/content', async (c) => {
     "SELECT u.content_group AS g, COUNT(*) AS n FROM posts p JOIN users u ON u.id = p.user_id WHERE p.source = 'content' AND p.created_at >= ? GROUP BY u.content_group"
   ).bind(since).all();
   const log = await c.env.DB.prepare('SELECT kind, detail, created_at FROM content_log ORDER BY created_at DESC LIMIT 30').all();
+  const byGroup = await c.env.DB.prepare('SELECT content_group AS g, COUNT(*) AS n, SUM(content_enabled) AS on_n FROM users WHERE is_content = 1 GROUP BY content_group').all<{ g: string; n: number; on_n: number }>();
+  const groups = Object.fromEntries(byGroup.results.map((r) => [r.g, { total: r.n, enabled: r.on_n }]));
+  const perDay = byGroup.results.reduce((sum, r) => sum + (s[`group_${r.g}`] === '0' ? 0 : (r.on_n * 1440) / Math.max(10, Number(s[`interval_${r.g}`] || 4500))), 0);
   return c.json({
     accounts: r.results,
     settings: { ...s, newsdata_key: s.newsdata_key ? '已設定' : '' },
     today: Object.fromEntries(today.results.map((x: any) => [x.g, x.n])),
+    groups,
+    posts_per_day: Math.round(perDay),
+    default_model: c.env.AI_MODEL,
     log: log.results,
   });
 });
@@ -178,13 +186,17 @@ admin.patch('/content/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-const EDITABLE = ['content_enabled', 'interval_min', 'interact_like', 'interact_comment', 'old_posts_mode', 'group_news', 'group_game', 'group_mixed', 'paused_until', 'newsdata_key', 'rss_feeds'];
+const EDITABLE = ['content_enabled', 'interval_news', 'interval_game', 'interval_mixed', 'interval_fun', 'interact_like', 'interact_comment', 'old_posts_mode',
+  'group_news', 'group_game', 'group_mixed', 'group_fun', 'paused_until', 'newsdata_key', 'rss_feeds', 'feed_content_ratio', 'ai_model'];
+export const AI_MODELS = ['', '@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct-fp8-fast', '@cf/meta/llama-4-scout-17b-16e-instruct'];
 admin.patch('/settings', async (c) => {
   const b = await c.req.json<Record<string, any>>();
   for (const [k, v] of Object.entries(b)) {
     if (!EDITABLE.includes(k)) continue;
     let val = String(v);
-    if (k === 'interval_min' && !['30', '60', '120'].includes(val)) continue;
+    if (k.startsWith('interval_') && !(Number(val) >= 10 && Number(val) <= 20160)) continue;
+    if (k === 'feed_content_ratio' && !(Number(val) >= 0 && Number(val) <= 100)) continue;
+    if (k === 'ai_model' && !AI_MODELS.includes(val)) continue;
     if (k === 'old_posts_mode' && !['keep', 'hide'].includes(val)) continue;
     if (k === 'rss_feeds') {
       const list = (Array.isArray(v) ? v : []).map(String).filter((u) => /^https?:\/\//.test(u)).slice(0, 20);
@@ -205,7 +217,7 @@ admin.post('/content/disable-all', async (c) => {
 
 admin.post('/content/group/:g', async (c) => {
   const g = c.req.param('g');
-  if (!['news', 'game', 'mixed'].includes(g)) throw new HttpError(400, '分組不正確');
+  if (!['news', 'game', 'mixed', 'fun'].includes(g)) throw new HttpError(400, '分組不正確');
   const b = await c.req.json<any>();
   await setSetting(c.env.DB, `group_${g}`, b.enabled ? '1' : '0');
   return c.json({ ok: true });

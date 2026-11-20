@@ -11,10 +11,11 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL DEFAULT 'user',          -- user | gm
   status TEXT NOT NULL DEFAULT 'active',      -- active | suspended | banned
   is_content INTEGER NOT NULL DEFAULT 0,      -- 1 = ✦ 平台內容帳號
-  content_group TEXT,                         -- news | game | mixed
+  content_group TEXT,                         -- news | game | mixed | fun
   persona TEXT,                               -- 內容帳號的個性／主題
   content_enabled INTEGER NOT NULL DEFAULT 1,
   last_posted_at INTEGER,
+  next_post_at INTEGER,                       -- 內容帳號下一次發文時間
   age_verified INTEGER NOT NULL DEFAULT 0,
   show_sensitive INTEGER NOT NULL DEFAULT 0,
   theme TEXT NOT NULL DEFAULT 'forestsky',
@@ -232,7 +233,13 @@ CREATE TABLE IF NOT EXISTS daily_active (
 
 INSERT OR IGNORE INTO settings (key, value) VALUES
   ('content_enabled', '1'),
-  ('interval_min', '30'),
+  ('interval_news', '4500'),                 -- 每個帳號平均多久發一則（分鐘）
+  ('interval_game', '4500'),
+  ('interval_mixed', '4500'),
+  ('interval_fun', '60'),
+  ('group_fun', '1'),
+  ('feed_content_ratio', '50'),              -- 熱門動態牆中 ✦ 內容最多佔幾 %
+  ('ai_model', ''),                          -- 空白 = 用 wrangler.toml 的 AI_MODEL
   ('interact_like', '1'),
   ('interact_comment', '1'),
   ('old_posts_mode', 'keep'),
