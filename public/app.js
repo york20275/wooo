@@ -32,6 +32,8 @@ const ICON = {
   mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
   image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-8 8"/>',
   pen: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m14 6 4 4"/>',
+  poll: '<path d="M5 20V10M12 20V4M19 20v-7"/>',
+  hash: '<path d="M5 9h14M4 15h14M10 3 8 21M16 3l-2 18"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   eyeoff: '<path d="M3 3l18 18"/><path d="M10.6 6.1A10 10 0 0 1 12 6c5 0 9 6 9 6a17 17 0 0 1-3 3.6M6.4 7.4C4.2 9 3 12 3 12s4 6 9 6a9 9 0 0 0 3.6-.8"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
@@ -242,6 +244,36 @@ function shell(path, mainEl) {
 const pageTitle = (t) => h('h1', { class: 'ptitle' }, t);
 
 // ---------- 貼文卡片 ----------
+/** 投票卡：還沒投 → 選項按鈕；投過／已結束／自己的文 → 顯示結果 */
+function pollBox(p) {
+  const box = h('div', { class: 'poll' });
+  const draw = () => {
+    const poll = p.poll;
+    const mine = S.me && S.me.id === p.author.id;
+    const showResult = poll.voted !== null || poll.closed || mine;
+    const left = poll.ends_at - Date.now();
+    const leftText = poll.closed ? '投票已結束' : left > 86400000 ? `剩 ${Math.ceil(left / 86400000)} 天` : left > 3600000 ? `剩 ${Math.ceil(left / 3600000)} 小時` : `剩 ${Math.max(1, Math.ceil(left / 60000))} 分鐘`;
+    const max = Math.max(...poll.options.map((o) => o.votes));
+    box.replaceChildren(
+      ...poll.options.map((o, i) => {
+        if (!showResult) {
+          return h('button', { class: 'poll-opt', onclick: async () => {
+            if (!S.me) return needLogin();
+            try { const d = await api('POST', `/api/posts/${p.id}/vote`, { idx: i }); p.poll = d.poll; draw(); }
+            catch (e) { toast(e.message); }
+          } }, o.text);
+        }
+        const pct = poll.total ? Math.round((o.votes / poll.total) * 100) : 0;
+        return h('div', { class: `poll-bar ${poll.voted === i ? 'mine' : ''} ${poll.closed && o.votes === max && max > 0 ? 'win' : ''}` },
+          h('span', { class: 'fill', style: `width:${pct}%` }),
+          h('span', { class: 'label' }, o.text, poll.voted === i ? ' ✓' : ''), h('b', null, `${pct}%`));
+      }),
+      h('span', { class: 'muted poll-meta' }, `${poll.total} 票 · ${leftText}`));
+  };
+  draw();
+  return box;
+}
+
 function postCard(p, { onDelete, full = false, pinned = false } = {}) {
   const el = h('article', { class: 'post glass' });
   const likeBtn = h('button', { class: 'icon-btn' });
@@ -308,6 +340,7 @@ function postCard(p, { onDelete, full = false, pinned = false } = {}) {
       isBlog ? h(full ? 'h1' : 'a', { class: 'blogtitle', href: full ? null : `/p/${p.id}` }, p.title) : null,
       textEl, more,
       p.link ? h('a', { class: 'linkcard', href: p.link.url, target: '_blank', rel: 'noopener nofollow' }, h('small', null, p.link.site || '新聞來源'), h('b', null, p.link.title || p.link.url)) : null,
+      p.poll ? pollBox(p) : null,
       media,
       h('div', { class: 'actions' }, likeBtn,
         h('a', { class: 'icon-btn', href: `/p/${p.id}`, 'aria-label': '留言' }, icon('chat'), String(p.comment_count)),
@@ -355,27 +388,116 @@ function imagePicker(onKey) {
   const btn = h('button', { class: 'icon-btn', style: 'color:var(--primary)', 'aria-label': '加入圖片', onclick: () => file.click() }, icon('image'));
   return { btn, file, preview, err, reset: () => { key = null; preview.replaceChildren(); } };
 }
+/** 打字時的 @帳號、#標籤 提示 */
+function attachSuggest(ta) {
+  const pop = h('div', { class: 'suggest', role: 'listbox', hidden: true });
+  let timer = null, items = [], active = 0, token = null;
+  const close = () => { pop.hidden = true; items = []; token = null; };
+  const insert = (text) => {
+    if (!token) return;
+    const before = ta.value.slice(0, token.start), after = ta.value.slice(ta.selectionStart);
+    ta.value = before + text + ' ' + after;
+    const pos = (before + text + ' ').length;
+    ta.setSelectionRange(pos, pos); ta.focus(); close();
+  };
+  const draw = () => {
+    pop.replaceChildren(...items.map((it, i) => h('button', { type: 'button', role: 'option', class: i === active ? 'on' : '', onmousedown: (e) => { e.preventDefault(); insert(it.insert); } },
+      it.user ? [avatar(it.user, 'sm'), h('span', null, it.user.name), it.user.is_content ? h('span', { class: 'star' }, '✦') : null, h('small', null, `@${it.user.handle}`)] : [h('span', null, `#${it.tag}`), h('small', null, `${it.count} 篇`)])));
+    pop.hidden = !items.length;
+  };
+  ta.addEventListener('input', () => {
+    clearTimeout(timer);
+    const m = ta.value.slice(0, ta.selectionStart).match(/(^|\s)([#@])([\p{L}\p{N}_]{0,20})$/u);
+    if (!m || (m[2] === '@' && !m[3])) return close();
+    token = { start: ta.selectionStart - m[3].length - 1 };
+    timer = setTimeout(async () => {
+      try {
+        const d = await api('GET', `/api/suggest?type=${m[2] === '@' ? 'user' : 'tag'}&q=${encodeURIComponent(m[3])}`);
+        items = d.items.map((x) => (x.handle ? { user: x, insert: `@${x.handle}` } : { tag: x.tag, count: x.count, insert: `#${x.tag}` }));
+        active = 0; draw();
+      } catch { close(); }
+    }, 200);
+  });
+  ta.addEventListener('keydown', (e) => {
+    if (pop.hidden) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); active = (active + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length; draw(); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insert(items[active].insert); }
+    else if (e.key === 'Escape') close();
+  });
+  ta.addEventListener('blur', () => setTimeout(close, 150));
+  return pop;
+}
+
 function composer(onPosted) {
   const ta = h('textarea', { rows: '2', maxlength: '1000', placeholder: '有什麼想說的？用 #標籤、@帳號 都可以' });
+  const suggest = attachSuggest(ta);
   const sens = h('input', { type: 'checkbox' });
   const err = h('span', { class: 'err' });
   let imageKey = null;
   const pick = imagePicker((k) => { imageKey = k; });
+
+  // 標籤：最多 5 個，發文時加在文末
+  let tags = [];
+  const tagRow = h('div', { class: 'tag-row', hidden: true });
+  const tagInput = h('input', { class: 'tag-input', maxlength: '20', placeholder: '輸入標籤後按 Enter', 'aria-label': '新增標籤' });
+  const drawTags = () => {
+    tagRow.replaceChildren(...tags.map((t) => h('span', { class: 'chip' }, `#${t}`, h('button', { type: 'button', 'aria-label': `移除 #${t}`, onclick: () => { tags = tags.filter((x) => x !== t); drawTags(); } }, '×'))), tags.length < 5 ? tagInput : null);
+  };
+  tagInput.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ',' && e.key !== ' ') return;
+    e.preventDefault();
+    const t = tagInput.value.replace(/^#/, '').replace(/[^\p{L}\p{N}_]/gu, '').slice(0, 20);
+    if (t && !tags.includes(t) && tags.length < 5) tags.push(t);
+    tagInput.value = ''; drawTags(); tagInput.focus();
+  });
+  const tagBtn = h('button', { type: 'button', class: 'icon-btn', style: 'color:var(--primary)', onclick: () => { tagRow.hidden = false; drawTags(); tagInput.focus(); } }, icon('hash'), '標籤');
+
+  // 投票：2～5 個選項
+  let pollOn = false;
+  const pollEditor = h('div', { class: 'poll-editor', hidden: true });
+  let optInputs = [];
+  const days = h('select', { 'aria-label': '投票期限' }, [['1', '1 天'], ['3', '3 天'], ['7', '7 天']].map(([v, l]) => h('option', { value: v }, l)));
+  const drawPoll = () => {
+    pollEditor.replaceChildren(
+      ...optInputs.map((inp, i) => h('div', { class: 'row' }, inp, optInputs.length > 2 ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': `刪除選項 ${i + 1}`, onclick: () => { optInputs.splice(i, 1); relabel(); drawPoll(); } }, icon('x')) : null)),
+      h('div', { class: 'row wrap' },
+        optInputs.length < 5 ? h('button', { type: 'button', class: 'btn ghost small', onclick: () => { optInputs.push(newOpt()); relabel(); drawPoll(); optInputs[optInputs.length - 1].focus(); } }, '＋ 新增選項') : null,
+        h('label', { class: 'row', style: 'gap:6px' }, h('span', { class: 'muted' }, '期限'), days),
+        h('span', { style: 'flex:1' }),
+        h('button', { type: 'button', class: 'btn ghost small', onclick: () => togglePoll(false) }, '移除投票')));
+  };
+  const newOpt = () => h('input', { maxlength: '40' });
+  const relabel = () => optInputs.forEach((inp, i) => { inp.placeholder = `選項 ${i + 1}`; inp.setAttribute('aria-label', `選項 ${i + 1}`); });
+  const togglePoll = (on) => {
+    pollOn = on; pollEditor.hidden = !on;
+    if (on) { optInputs = [newOpt(), newOpt()]; relabel(); drawPoll(); optInputs[0].focus(); ta.placeholder = '投票題目，例如：週末最想窩在哪裡？'; }
+    else { ta.placeholder = '有什麼想說的？用 #標籤、@帳號 都可以'; }
+  };
+  const pollBtn = h('button', { type: 'button', class: 'icon-btn', style: 'color:var(--primary)', onclick: () => togglePoll(!pollOn) }, icon('poll'), '投票');
+
   const send = h('button', { class: 'btn' }, '發布');
   send.addEventListener('click', async () => {
     err.textContent = '';
-    if (!ta.value.trim() && !imageKey) { err.textContent = '寫點什麼或加張圖片吧'; ta.focus(); return; }
+    if (!ta.value.trim() && !imageKey) { err.textContent = pollOn ? '請寫下投票的題目' : '寫點什麼或加張圖片吧'; ta.focus(); return; }
+    let poll = null;
+    if (pollOn) {
+      const options = optInputs.map((x) => x.value.trim()).filter(Boolean);
+      if (options.length < 2) { err.textContent = '投票至少要填 2 個選項'; return; }
+      poll = { options, days: Number(days.value) };
+    }
+    const text = ta.value.trim() + (tags.length ? `\n${tags.map((t) => `#${t}`).join(' ')}` : '');
     send.disabled = true;
     try {
-      await api('POST', '/api/posts', { text: ta.value, image_key: imageKey, sensitive: sens.checked });
+      await api('POST', '/api/posts', { text, image_key: imageKey, sensitive: sens.checked, poll });
       ta.value = ''; imageKey = null; pick.reset(); sens.checked = false;
+      tags = []; tagRow.hidden = true; togglePoll(false);
       toast('已發布'); onPosted?.();
     } catch (e) { err.textContent = e.message; } finally { send.disabled = false; }
   });
   return h('section', { class: 'composer glass', 'aria-label': '發表新文章' }, avatar(S.me),
-    h('div', { style: 'flex:1;min-width:0' },
-      h('label', null, h('span', { class: 'sr' }, '文章內容'), ta), pick.preview, err, pick.err,
-      h('div', { class: 'row' }, pick.btn, pick.file,
+    h('div', { style: 'flex:1;min-width:0;position:relative' },
+      h('label', null, h('span', { class: 'sr' }, '文章內容'), ta), suggest, pollEditor, tagRow, pick.preview, err, pick.err,
+      h('div', { class: 'row wrap' }, pick.btn, pick.file, pollBtn, tagBtn,
         h('button', { class: 'icon-btn', style: 'color:var(--primary)', onclick: () => blogEditor(onPosted) }, icon('pen'), '寫網誌'),
         h('label', { class: 'check' }, sens, '標記敏感'),
         h('span', { style: 'flex:1' }), send)));

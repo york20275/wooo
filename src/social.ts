@@ -326,6 +326,7 @@ export async function deleteUserData(env: any, uid: string) {
   const stmts: any[] = [
     db.prepare('DELETE FROM comments WHERE user_id = ?').bind(uid),
     db.prepare('DELETE FROM likes WHERE user_id = ?').bind(uid),
+    db.prepare('DELETE FROM poll_votes WHERE user_id = ?').bind(uid),
     db.prepare('DELETE FROM follows WHERE follower_id = ? OR followee_id = ?').bind(uid, uid),
     db.prepare('DELETE FROM notifications WHERE user_id = ? OR actor_id = ?').bind(uid, uid),
     db.prepare('DELETE FROM blocks WHERE blocker_id = ? OR blocked_id = ?').bind(uid, uid),

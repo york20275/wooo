@@ -225,3 +225,31 @@ h1.blogtitle { font-size: 26px; }
 .pimg .credit { position: absolute; right: 8px; bottom: 8px; font-size: 11px; color: #fff; background: rgba(0,0,0,.45); padding: 2px 8px; border-radius: 999px; text-decoration: none; }
 .pimg .credit:hover { background: rgba(0,0,0,.65); }
 .pimg.blur .credit { display: none; }
+
+/* 投票 */
+.poll { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 4px; }
+.poll-opt { text-align: left; padding: 10px 14px; border-radius: 12px; border: 1.5px solid var(--primary); background: transparent; color: var(--primary); font: inherit; font-weight: 600; cursor: pointer; }
+.poll-opt:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.poll-bar { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; border-radius: 12px; overflow: hidden; background: color-mix(in srgb, var(--text, #222) 6%, transparent); }
+.poll-bar .fill { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--primary) 22%, transparent); transition: width .5s ease; }
+.poll-bar.mine .fill, .poll-bar.win .fill { background: color-mix(in srgb, var(--primary) 38%, transparent); }
+.poll-bar .label, .poll-bar b { position: relative; }
+.poll-bar.mine .label, .poll-bar.win .label { font-weight: 700; }
+.poll-meta { font-size: 13px; }
+.poll-editor { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; padding: 12px; border-radius: 14px; background: color-mix(in srgb, var(--primary) 6%, transparent); }
+.poll-editor input { flex: 1; }
+.poll-editor .row { gap: 8px; align-items: center; }
+/* 標籤 */
+.tag-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+.tag-row .chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 10px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary); font-weight: 600; font-size: 14px; }
+.tag-row .chip button { border: 0; background: none; color: inherit; cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
+.tag-input { flex: 1; min-width: 140px; border: 0; background: transparent; font: inherit; padding: 4px; outline: none; }
+/* @ # 提示 */
+.suggest { position: absolute; z-index: 30; left: 0; top: 64px; min-width: 240px; max-width: 100%; background: rgba(255,255,255,.97); border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.15); padding: 6px; display: flex; flex-direction: column; }
+.suggest[hidden] { display: none; }
+.suggest button { display: flex; align-items: center; gap: 8px; border: 0; background: none; padding: 8px 10px; border-radius: 10px; font: inherit; text-align: left; cursor: pointer; color: inherit; }
+.suggest button.on, .suggest button:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.suggest small { color: var(--muted); margin-left: auto; }
+.suggest .star { color: var(--primary); font-size: 12px; }
+.poll-editor input { padding: 9px 12px; border-radius: 10px; border: 1px solid rgba(0,0,0,.12); background: rgba(255,255,255,.8); font: inherit; }
+.poll-editor select { padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(0,0,0,.12); background: rgba(255,255,255,.8); font: inherit; }

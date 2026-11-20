@@ -225,6 +225,27 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 );
 CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
 
+-- 投票（一篇文最多一個投票，2～5 個選項，每人一票、投了不能改）
+CREATE TABLE IF NOT EXISTS polls (
+  post_id TEXT PRIMARY KEY,
+  ends_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS poll_options (
+  post_id TEXT NOT NULL,
+  idx INTEGER NOT NULL,
+  text TEXT NOT NULL,
+  votes INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (post_id, idx)
+);
+CREATE TABLE IF NOT EXISTS poll_votes (
+  post_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  idx INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (post_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_poll_votes_user ON poll_votes(user_id);
+
 -- 每日統計（儀表板圖表用）
 CREATE TABLE IF NOT EXISTS daily_active (
   day TEXT NOT NULL,

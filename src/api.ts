@@ -54,7 +54,7 @@ export function mixContent<T extends { source: string }>(ranked: T[], ratio: num
   return out.concat(waiting);
 }
 
-export function serializePost(r: any, likedSet?: Set<string>) {
+export function serializePost(r: any, likedSet?: Set<string>, polls?: Map<string, any>) {
   return {
     id: r.id,
     kind: r.kind || 'post',
@@ -68,6 +68,7 @@ export function serializePost(r: any, likedSet?: Set<string>) {
     like_count: r.like_count,
     comment_count: r.comment_count,
     liked: likedSet ? likedSet.has(r.id) : false,
+    poll: polls?.get(r.id) ?? null,
     author: { id: r.author_id, name: r.author_name, handle: r.author_handle, avatar_url: imgUrl(r.author_avatar), is_content: !!r.author_is_content },
   };
 }
@@ -79,6 +80,32 @@ async function likedSetFor(c: any, ids: string[]): Promise<Set<string>> {
   const qs = ids.map(() => '?').join(',');
   const r = await c.env.DB.prepare(`SELECT post_id FROM likes WHERE user_id = ? AND post_id IN (${qs})`).bind(u.id, ...ids).all();
   return new Set(r.results.map((x: any) => x.post_id));
+}
+
+/** 一次載入多篇文章的投票（選項、票數、自己投了哪個） */
+async function pollsFor(c: any, ids: string[]): Promise<Map<string, any>> {
+  const out = new Map<string, any>();
+  if (!ids.length) return out;
+  const qs = ids.map(() => '?').join(',');
+  const polls = await c.env.DB.prepare(`SELECT post_id, ends_at FROM polls WHERE post_id IN (${qs})`).bind(...ids).all();
+  if (!polls.results.length) return out;
+  const pids = polls.results.map((p: any) => p.post_id);
+  const pq = pids.map(() => '?').join(',');
+  const opts = await c.env.DB.prepare(`SELECT post_id, idx, text, votes FROM poll_options WHERE post_id IN (${pq}) ORDER BY idx`).bind(...pids).all();
+  const u = c.get('user') as User | null;
+  const mine = u ? await c.env.DB.prepare(`SELECT post_id, idx FROM poll_votes WHERE user_id = ? AND post_id IN (${pq})`).bind(u.id, ...pids).all() : { results: [] };
+  const voted = new Map((mine.results as any[]).map((v) => [v.post_id, v.idx]));
+  for (const p of polls.results as any[]) {
+    const options = (opts.results as any[]).filter((o) => o.post_id === p.post_id).map((o) => ({ text: o.text, votes: o.votes }));
+    out.set(p.post_id, { options, total: options.reduce((s, o) => s + o.votes, 0), ends_at: p.ends_at, closed: p.ends_at <= now(), voted: voted.has(p.post_id) ? voted.get(p.post_id) : null });
+  }
+  return out;
+}
+/** 文章列表輸出：按讚狀態＋投票一起載入 */
+async function serializeMany(c: any, rows: any[]) {
+  const ids = rows.map((r) => r.id as string);
+  const [liked, polls] = await Promise.all([likedSetFor(c, ids), pollsFor(c, ids)]);
+  return rows.map((r) => serializePost(r, liked, polls));
 }
 
 /** 共用的可見性條件：隱藏、停權、敏感內容、內容帳號舊文、封鎖與靜音 */
@@ -220,8 +247,7 @@ api.get('/feed', async (c) => {
     const offset = Number(c.req.query('offset') || 0);
     rows = mixed.slice(offset, offset + 20);
   }
-  const liked = await likedSetFor(c, rows.map((r) => r.id));
-  return c.json({ posts: rows.map((r) => serializePost(r, liked)) });
+  return c.json({ posts: await serializeMany(c, rows) });
 });
 
 /** #標籤頁 */
@@ -231,8 +257,7 @@ api.get('/tags/:tag', async (c) => {
   const r = await c.env.DB.prepare(`SELECT ${POST_COLS} FROM posts p JOIN users u ON u.id = p.user_id WHERE ${vis} AND p.text LIKE ? ORDER BY p.created_at DESC LIMIT 50`)
     .bind(...vb, `%#${tag}%`).all();
   const rows = r.results.filter((x: any) => new RegExp(`#${tag}(?![\\p{L}\\p{N}_])`, 'u').test(x.text));
-  const liked = await likedSetFor(c, rows.map((x: any) => x.id));
-  return c.json({ tag, posts: rows.map((x: any) => serializePost(x, liked)) });
+  return c.json({ tag, posts: await serializeMany(c, rows) });
 });
 
 api.get('/posts/:id', async (c) => {
@@ -246,9 +271,9 @@ api.get('/posts/:id', async (c) => {
      ${me ? "AND c.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ?) AND c.user_id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = ? AND kind = 'block')" : ''}
      ORDER BY c.created_at LIMIT 300`
   ).bind(r.id, ...(me ? [me.id, me.id] : [])).all();
-  const liked = await likedSetFor(c, [r.id as string]);
+  const [post] = await serializeMany(c, [r]);
   return c.json({
-    post: serializePost(r, liked),
+    post,
     comments: cm.results.map((x: any) => ({
       id: x.id, text: x.text, parent_id: x.parent_id, created_at: x.created_at,
       author: { id: x.uid, name: x.name, handle: x.handle, avatar_url: imgUrl(x.avatar_key), is_content: !!x.is_content },
@@ -273,6 +298,16 @@ api.post('/posts', async (c) => {
   const text = String(b.text || '').trim();
   const title = kind === 'blog' ? String(b.title || '').trim().slice(0, 100) : null;
   if (kind === 'blog' && !title) throw new HttpError(400, '網誌要有標題');
+  // 投票：2～5 個選項，每個最多 40 字，期限 1／3／7 天
+  let poll: { options: string[]; days: number } | null = null;
+  if (b.poll && kind === 'post') {
+    const options = (Array.isArray(b.poll.options) ? b.poll.options : []).map((x: any) => String(x || '').trim()).filter(Boolean);
+    if (options.length < 2 || options.length > 5) throw new HttpError(400, '投票要有 2 到 5 個選項');
+    if (options.some((o: string) => o.length > 40)) throw new HttpError(400, '每個選項最多 40 字');
+    if (new Set(options).size !== options.length) throw new HttpError(400, '選項不能重複');
+    if (!text) throw new HttpError(400, '請寫下投票的題目');
+    poll = { options, days: [1, 3, 7].includes(Number(b.poll.days)) ? Number(b.poll.days) : 1 };
+  }
   if (!text && !b.image_key) throw new HttpError(400, '內容不能空白');
   const max = kind === 'blog' ? BLOG_MAX : POST_MAX;
   if (text.length > max) throw new HttpError(400, `內容最多 ${max} 字`);
@@ -283,8 +318,50 @@ api.post('/posts', async (c) => {
   const id = newId();
   await c.env.DB.prepare('INSERT INTO posts (id, user_id, text, title, kind, image_key, sensitive, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(id, u.id, text, title, kind, imageKey, b.sensitive ? 1 : 0, 'user', now()).run();
+  if (poll) {
+    await c.env.DB.batch([
+      c.env.DB.prepare('INSERT INTO polls (post_id, ends_at) VALUES (?, ?)').bind(id, now() + poll.days * 86400_000),
+      ...poll.options.map((o, i) => c.env.DB.prepare('INSERT INTO poll_options (post_id, idx, text) VALUES (?, ?, ?)').bind(id, i, o)),
+    ]);
+  }
   await notifyMentions(c, u, text, id);
   return c.json({ id });
+});
+
+/** 投票：每人一票，投了不能改；投票結束後不能再投 */
+api.post('/posts/:id/vote', async (c) => {
+  const u = requireUser(c);
+  requireHuman(c, u);
+  const id = c.req.param('id');
+  const idx = Number((await c.req.json<any>()).idx);
+  const [vis, vb] = await visibility(c);
+  const post = await c.env.DB.prepare(`SELECT p.id FROM posts p JOIN users u ON u.id = p.user_id WHERE p.id = ? AND ${vis}`).bind(id, ...vb).first();
+  if (!post) throw new HttpError(404, '找不到這篇文章');
+  const poll = await c.env.DB.prepare('SELECT ends_at FROM polls WHERE post_id = ?').bind(id).first<{ ends_at: number }>();
+  if (!poll) throw new HttpError(404, '這篇文章沒有投票');
+  if (poll.ends_at <= now()) throw new HttpError(400, '投票已經結束');
+  const opt = await c.env.DB.prepare('SELECT 1 FROM poll_options WHERE post_id = ? AND idx = ?').bind(id, idx).first();
+  if (!opt) throw new HttpError(400, '沒有這個選項');
+  const r = await c.env.DB.prepare('INSERT OR IGNORE INTO poll_votes (post_id, user_id, idx, created_at) VALUES (?, ?, ?, ?)').bind(id, u.id, idx, now()).run();
+  if (r.meta.changes) await c.env.DB.prepare('UPDATE poll_options SET votes = votes + 1 WHERE post_id = ? AND idx = ?').bind(id, idx).run();
+  const polls = await pollsFor(c, [id]);
+  return c.json({ poll: polls.get(id) });
+});
+
+/** 打字時的提示：@帳號、#標籤 */
+api.get('/suggest', async (c) => {
+  const type = c.req.query('type');
+  const q = String(c.req.query('q') || '').replace(/[%_]/g, '').trim().slice(0, 30);
+  if (type === 'user') {
+    if (!q) return c.json({ items: [] });
+    const r = await c.env.DB.prepare("SELECT name, handle, avatar_key, is_content FROM users WHERE status = 'active' AND (handle LIKE ? OR name LIKE ?) ORDER BY is_content, last_seen_at DESC LIMIT 6")
+      .bind(`${q}%`, `%${q}%`).all();
+    return c.json({ items: r.results.map((x: any) => ({ name: x.name, handle: x.handle, avatar_url: imgUrl(x.avatar_key), is_content: !!x.is_content })) });
+  }
+  const r = await c.env.DB.prepare("SELECT text FROM posts WHERE hidden = 0 AND created_at > ? AND text LIKE ? ORDER BY created_at DESC LIMIT 400").bind(now() - 14 * 86400_000, `%#${q}%`).all();
+  const count = new Map<string, number>();
+  for (const row of r.results as any[]) for (const m of String(row.text).matchAll(/#([\p{L}\p{N}_]{1,20})/gu)) if (m[1].toLowerCase().startsWith(q.toLowerCase())) count.set(m[1], (count.get(m[1]) || 0) + 1);
+  return c.json({ items: [...count.entries()].sort((x, y) => y[1] - x[1]).slice(0, 6).map(([tag, n]) => ({ tag, count: n })) });
 });
 
 api.delete('/posts/:id', async (c) => {
@@ -301,6 +378,9 @@ export async function deletePost(env: any, id: string, imageKey: string | null) 
     env.DB.prepare('DELETE FROM posts WHERE id = ?').bind(id),
     env.DB.prepare('DELETE FROM comments WHERE post_id = ?').bind(id),
     env.DB.prepare('DELETE FROM likes WHERE post_id = ?').bind(id),
+    env.DB.prepare('DELETE FROM polls WHERE post_id = ?').bind(id),
+    env.DB.prepare('DELETE FROM poll_options WHERE post_id = ?').bind(id),
+    env.DB.prepare('DELETE FROM poll_votes WHERE post_id = ?').bind(id),
     env.DB.prepare('DELETE FROM notifications WHERE post_id = ?').bind(id),
     env.DB.prepare('UPDATE users SET pinned_post_id = NULL WHERE pinned_post_id = ?').bind(id),
   ]);
@@ -426,8 +506,7 @@ api.get('/users/:handle', async (c) => {
     const r = await c.env.DB.prepare(
       `SELECT ${POST_COLS} FROM posts p JOIN users u ON u.id = p.user_id WHERE ${vis} AND p.user_id = ? ${tab === 'blog' ? "AND p.kind = 'blog'" : ''} ORDER BY p.created_at DESC LIMIT 30`
     ).bind(...vb, p.id).all();
-    const liked = await likedSetFor(c, r.results.map((x: any) => x.id));
-    posts = r.results.map((x: any) => serializePost(x, liked));
+    posts = await serializeMany(c, r.results);
     if (p.pinned_post_id && tab === 'posts') {
       pinned = posts.find((x) => x.id === p.pinned_post_id) || null;
       if (pinned) posts = posts.filter((x) => x.id !== pinned.id);
@@ -513,8 +592,7 @@ api.get('/search', async (c) => {
   const users = await c.env.DB.prepare("SELECT id, name, handle, avatar_key, is_content FROM users WHERE status != 'banned' AND (name LIKE ? OR handle LIKE ?) LIMIT 10").bind(like, like).all();
   const [vis, vb] = await visibility(c);
   const posts = await c.env.DB.prepare(`SELECT ${POST_COLS} FROM posts p JOIN users u ON u.id = p.user_id WHERE ${vis} AND (p.text LIKE ? OR p.title LIKE ?) ORDER BY p.created_at DESC LIMIT 20`).bind(...vb, like, like).all();
-  const liked = await likedSetFor(c, posts.results.map((x: any) => x.id));
-  return c.json({ users: users.results.map(pubUser), posts: posts.results.map((x: any) => serializePost(x, liked)) });
+  return c.json({ users: users.results.map(pubUser), posts: await serializeMany(c, posts.results) });
 });
 
 api.get('/topics', async (c) => {
