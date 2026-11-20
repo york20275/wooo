@@ -1,0 +1,41 @@
+name = "wooo"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# 前端靜態檔（public/），/api、/auth、/img 先交給 Worker 處理
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/auth/*", "/img/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "wooo-db"
+database_id = "請換成 wrangler d1 create 產生的 ID"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "wooo-images"
+
+[ai]
+binding = "AI"
+
+# 每 30 分鐘發文排程；每 10 分鐘互動與抓新聞
+[triggers]
+crons = ["*/30 * * * *", "*/10 * * * *"]
+
+[vars]
+SITE_NAME = "窩Wooo！"
+# 網站網址（Google 登入回呼用），上線後改成你的網域
+SITE_URL = "http://localhost:8787"
+# GM 管理員的 Gmail，多個用逗號分隔
+GM_EMAILS = ""
+# Workers AI 模型
+AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+# 本機測試用：1 = 開啟免 Google 的測試登入與測試年齡驗證。正式上線一定要是 0
+DEV_MODE = "0"
+
+# 以下用 wrangler secret put 設定，不要寫在這個檔案：
+# GOOGLE_CLIENT_ID、GOOGLE_CLIENT_SECRET、NEWSDATA_API_KEY（也可在後台設定）
