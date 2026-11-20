@@ -354,3 +354,8 @@ h1.blogtitle { font-size: 26px; }
 .badge { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: rgba(255,255,255,.65); border: 1px solid rgba(0,0,0,.08); cursor: default; }
 @media (max-width: 640px) { .tstats { grid-template-columns: repeat(2, 1fr); } .tbar { grid-template-columns: 100px 1fr 32px; } .pimg.grid.g2, .pimg.grid.g3, .pimg.grid.g4 { height: 240px; } }
 .appeal .pill { align-self: flex-start; }
+
+.bchips { display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 4px; scrollbar-width: none; }
+.bchips::-webkit-scrollbar { display: none; }
+.bchips button { flex: none; border: 1px solid rgba(0,0,0,.08); background: rgba(255,255,255,.6); padding: 6px 12px; border-radius: 999px; font: inherit; font-size: 13px; cursor: pointer; color: var(--text); }
+.bchips button.on { background: var(--primary); color: #fff; border-color: var(--primary); }

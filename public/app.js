@@ -1,7 +1,7 @@
 'use strict';
 /* 窩Woo！前端（不需要建置工具的單頁應用程式） */
 
-const S = { me: null, unread: 0, unreadMsg: 0, dev: false, feedTab: 'hot', turnstile: null, vapid: null, accents: [] };
+const S = { hotBoard: '', me: null, unread: 0, unreadMsg: 0, dev: false, feedTab: 'hot', turnstile: null, vapid: null, accents: [] };
 const app = document.getElementById('app');
 
 // ---------- 小工具 ----------
@@ -544,7 +544,7 @@ function postList(loader, emptyText) {
 }
 function feedPage() {
   const pl = postList(async (st) => {
-    const qs = S.feedTab === 'hot' ? `tab=hot&offset=${st.offset}` : `tab=following${st.before ? `&before=${st.before}` : ''}`;
+    const qs = S.feedTab === 'hot' ? `tab=hot&offset=${st.offset}${S.hotBoard ? `&board=${S.hotBoard}` : ''}` : `tab=following${st.before ? `&before=${st.before}` : ''}`;
     return (await api('GET', `/api/feed?${qs}`)).posts;
   }, S.feedTab === 'following' ? (S.me ? '你追蹤的人還沒有發文，去探索看看吧' : '登入後就能看到你追蹤的人') : '還沒有文章，來發第一篇吧');
   const tab = (key, label) => h('button', { class: S.feedTab === key ? 'on' : '', role: 'tab', 'aria-selected': String(S.feedTab === key), onclick: () => { S.feedTab = key; render(); } }, label);
@@ -552,7 +552,8 @@ function feedPage() {
     S.me ? composer(() => pl.load(true)) : h('div', { class: 'card glass' }, h('h2', null, '歡迎來到窩Woo！'), h('p', { style: 'margin:0' }, '一個可以慵懶窩著、隨意分享日常的地方。'), loginButton()),
     storiesBar(),
     h('div', { class: 'tabs', role: 'tablist', 'aria-label': '動態牆' }, tab('following', '追蹤中'), tab('hot', '熱門')),
-    S.feedTab === 'hot' ? dailyPollCard() : null,
+    S.feedTab === 'hot' ? boardChips(() => render()) : null,
+    S.feedTab === 'hot' && !S.hotBoard ? dailyPollCard() : null,
     pl.el);
   shell('/', main);
   pl.load(true);

@@ -41,6 +41,18 @@ export const POST_COLS = `p.id, p.user_id, p.text, p.title, p.kind, p.image_key,
  * 依排名順序合併，但 ✦ 內容在任何位置之前都不超過 ratio 比例；
  * 真人貼文不夠時，剩下的 ✦ 內容接在後面（網站剛起步時動態牆才不會空）。
  */
+export function diversifyBoards<T extends { community_id?: string | null }>(rows: T[], maxRun = 2): T[] {
+  const out: T[] = [];
+  const rest = [...rows];
+  while (rest.length) {
+    const last = out.slice(-maxRun);
+    const blocked = last.length === maxRun && last.every((x) => x.community_id && x.community_id === last[0].community_id) ? last[0].community_id : null;
+    const i = blocked ? rest.findIndex((x) => x.community_id !== blocked) : 0;
+    out.push(rest.splice(i < 0 ? 0 : i, 1)[0]);
+  }
+  return out;
+}
+
 export function mixContent<T extends { source: string }>(ranked: T[], ratio: number): T[] {
   const out: T[] = [];
   const waiting: T[] = [];
@@ -316,10 +328,12 @@ api.get('/feed', async (c) => {
   } else {
     // 熱門：只算真人讚數，越新越前面；熱門不放敏感內容
     const [vis, vb] = await visibility(c, { forHot: true });
+    // 可以只看某個分類版的熱門（?board=slug）
+    const board = c.req.query('board') ? await c.env.DB.prepare('SELECT id FROM communities WHERE slug = ?').bind(c.req.query('board')).first<{ id: string }>() : null;
     const r = await c.env.DB.prepare(
       `SELECT ${POST_COLS}, p.real_like_count FROM posts p JOIN users u ON u.id = p.user_id
-       WHERE ${vis} AND p.kind != 'repost' AND p.created_at > ? ORDER BY p.created_at DESC LIMIT 600`
-    ).bind(...vb, now() - 2 * 86400_000).all();
+       WHERE ${vis} AND p.kind != 'repost' ${board ? 'AND p.community_id = ?' : ''} AND p.created_at > ? ORDER BY p.created_at DESC LIMIT 600`
+    ).bind(...vb, ...(board ? [board.id] : []), now() - 2 * 86400_000).all();
     const t = now();
     const ranked = r.results
       .map((x: any) => ({ x, s: (x.real_like_count + 1) / Math.pow((t - x.created_at) / 3600_000 + 2, 1.5) }))
@@ -328,7 +342,8 @@ api.get('/feed', async (c) => {
     // ✦ 內容帳號的貼文最多只能佔熱門動態牆的一定比例，避免把真人的文洗掉
     const ratio = Math.min(100, Math.max(0, Number(await getSetting(c.env.DB, 'feed_content_ratio', '50')))) / 100;
     rows = mixContent(ranked, ratio);
-    const mixed = rows;
+    // 全部版一起看時，同一個分類版不連續出現超過 2 篇，熱門才會看到各版的文
+    const mixed = board ? rows : diversifyBoards(rows);
     const offset = Number(c.req.query('offset') || 0);
     rows = mixed.slice(offset, offset + 20);
   }

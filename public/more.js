@@ -292,6 +292,16 @@ async function communityPage(slug) {
   } catch (e) { main.replaceChildren(h('div', { class: 'empty glass' }, e.message)); }
 }
 
+/** 熱門上方的分類版按鈕：全部（各版混合）或只看某一版的熱門 */
+function boardChips(onChange) {
+  const row = h('div', { class: 'bchips', role: 'tablist', 'aria-label': '熱門分類版' });
+  const draw = (boards) => row.replaceChildren(
+    h('button', { class: !S.hotBoard ? 'on' : '', role: 'tab', 'aria-selected': String(!S.hotBoard), onclick: () => { S.hotBoard = ''; draw(boards); onChange(); } }, '全部'),
+    ...boards.map((b) => h('button', { class: S.hotBoard === b.slug ? 'on' : '', role: 'tab', 'aria-selected': String(S.hotBoard === b.slug), onclick: () => { S.hotBoard = b.slug; draw(boards); onChange(); } }, `${b.icon} ${b.name}`)));
+  api('GET', '/api/communities').then((d) => draw(d.communities)).catch(() => {});
+  return row;
+}
+
 /** 發文框的分類版選單：一定要選一個，預設「暢所欲言」 */
 function communitySelect(fixed) {
   const sel = h('select', { class: 'csel', 'aria-label': '發到哪個分類版' });

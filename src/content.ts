@@ -28,8 +28,25 @@ const pick = <T>(a: T[]) => a[Math.floor(Math.random() * a.length)];
 /** 依機率取整數：rate = 2.3 → 2 或 3（平均 2.3） */
 const randRound = (rate: number) => Math.floor(rate) + (Math.random() < rate % 1 ? 1 : 0);
 
-async function writePost(env: Env, model: string, a: Account, news: NewsItem | null, wantPhoto = false): Promise<string | null> {
-  const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。`;
+interface Board { id: string; name: string; description: string; content_group: string | null }
+
+/**
+ * ✦ 帳號每次發文都挑一個分類版（到處跑，不固定一個版）：
+ * 自己這組對應的版機率比較高，時事討論只放新聞摘要為主；新聞摘要大多發在時事討論。
+ */
+function chooseBoard(boards: Board[], a: Account, isNews: boolean): Board | null {
+  if (!boards.length) return null;
+  const newsBoard = boards.find((b) => b.content_group === 'news');
+  if (isNews) return newsBoard && Math.random() < 0.8 ? newsBoard : boards.find((b) => b.id === 'cm_free') || newsBoard || boards[0];
+  const weighted = boards.map((b) => ({ b, w: b.content_group === a.content_group ? 3 : b.content_group === 'news' ? 0.3 : 1 }));
+  let r = Math.random() * weighted.reduce((s, x) => s + x.w, 0);
+  for (const x of weighted) { r -= x.w; if (r <= 0) return x.b; }
+  return weighted[weighted.length - 1].b;
+}
+
+async function writePost(env: Env, model: string, a: Account, news: NewsItem | null, wantPhoto = false, board: Board | null = null): Promise<string | null> {
+  const boardLine = board && !news ? `\n這篇要發在「${board.name}」分類版（${board.description || board.name}）。內容要符合這個版的主題，但保持你的說話風格；如果這個版跟你平常的主題不同，就用你的角度聊這個版的話題。` : '';
+  const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。${boardLine}`;
   if (news) {
     const prompt = `請根據下面這則新聞的標題與摘要寫一則重點整理貼文。
 開頭固定寫「【新聞重點】」，接著用 2 到 4 句話整理重點，只能使用這裡提供的資訊，不可以加入沒提到的事實。
@@ -57,7 +74,7 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
   ]);
 }
 
-async function postOne(env: Env, model: string, a: Account, photoRatio: number, communityRatio = 0): Promise<string | null> {
+async function postOne(env: Env, model: string, a: Account, photoRatio: number, boards: Board[]): Promise<string | null> {
   // 不論成功與否都排到隊伍最後面，下一則換別人（輪流）
   const toBack = env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(now(), a.id);
   let news: NewsItem | null = null;
@@ -65,8 +82,9 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
     news = await takeNews(env);
     if (!news) { await toBack.run(); return null; }
   }
+  const board = chooseBoard(boards, a, !!news);
   const wantPhoto = !news && Math.random() * 100 < photoRatio;
-  const raw = await writePost(env, model, a, news, wantPhoto);
+  const raw = await writePost(env, model, a, news, wantPhoto, board);
   if (!raw) {
     await toBack.run();
     await logContent(env.DB, 'error', a.id, `${a.name}：AI 生成失敗，這次跳過`);
@@ -75,19 +93,14 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   const { text, query } = splitPhotoLine(raw);
   if (!text) { await toBack.run(); return null; }
   // 照片找不到就只發文字，不影響發文
-  const photo = wantPhoto ? await findPhoto(env, query || topicQuery(a.persona)).catch(() => null) : null;
-  // 文章發到對應的分類版（例如遊戲帳號 → 遊戲閒聊）
-  const cm = Math.random() * 100 < communityRatio
-    ? (await env.DB.prepare('SELECT id FROM communities WHERE content_group = ? LIMIT 1').bind(a.content_group).first<{ id: string }>())
-      ?? (await env.DB.prepare("SELECT id FROM communities WHERE id = 'cm_free'").first<{ id: string }>()) // 沒有對應的分類版就放「暢所欲言」
-    : null;
+  const photo = wantPhoto ? await findPhoto(env, query || topicQuery(`${board?.name || ''}${board?.description || ''}${a.persona}`)).catch(() => null) : null;
   const id = newId();
   const t = now();
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO posts (id, user_id, text, image_key, image_credit, image_credit_url, link_url, link_title, link_site, community_id, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'content', ?)`)
-      .bind(id, a.id, text.slice(0, 1000), photo?.key ?? null, photo?.credit ?? null, photo?.creditUrl ?? null, news?.url ?? null, news?.title ?? null, news ? siteOf(news.url, news.source) : null, cm?.id ?? null, t),
+      .bind(id, a.id, text.slice(0, 1000), photo?.key ?? null, photo?.credit ?? null, photo?.creditUrl ?? null, news?.url ?? null, news?.title ?? null, news ? siteOf(news.url, news.source) : null, board?.id ?? null, t),
     env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(t, a.id),
-    ...(cm ? [env.DB.prepare('UPDATE communities SET post_count = post_count + 1 WHERE id = ?').bind(cm.id)] : []),
+    ...(board ? [env.DB.prepare('UPDATE communities SET post_count = post_count + 1 WHERE id = ?').bind(board.id)] : []),
   ]);
   return id;
 }
@@ -122,7 +135,8 @@ export async function runPostTick(env: Env, opts: { force?: boolean } = {}) {
     const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM news_cache WHERE used = 0 AND fetched_at > ?').bind(now() - 36 * 3600_000).first<{ n: number }>();
     if (!left?.n) await fetchNewsImpl(env);
   }
-  const results = await Promise.all(due.results.map((a) => postOne(env, model, a, Number(s.photo_ratio ?? 30), Number(s.community_ratio ?? 100)).catch(() => null)));
+  const boards = (await env.DB.prepare('SELECT id, name, description, content_group FROM communities').all<Board>()).results;
+  const results = await Promise.all(due.results.map((a) => postOne(env, model, a, Number(s.photo_ratio ?? 30), boards).catch(() => null)));
   const posted = results.filter(Boolean).length;
   if (posted) await logContent(env.DB, 'post', null, `發文 ${posted} 則（${due.results.filter((_, i) => results[i]).map((a) => a.name).join('、')}）`);
   return posted ? { posted: results.find(Boolean), account: due.results[results.findIndex(Boolean)].name, count: posted } : { skipped: '這次沒有成功發文（可能沒有新聞或 AI 失敗）' };

@@ -322,7 +322,7 @@ CREATE TABLE IF NOT EXISTS communities (
   icon TEXT DEFAULT '',                       -- 一個表情符號當社團圖示
   owner_id TEXT,                              -- NULL = 官方社團
   official INTEGER NOT NULL DEFAULT 0,
-  content_group TEXT,                         -- ✦ 帳號哪一組會把部分文章發到這個社團
+  content_group TEXT,                         -- 哪一組 ✦ 帳號最常來這個版（他們還是會到各版發文）
   member_count INTEGER NOT NULL DEFAULT 0,
   post_count INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
@@ -355,7 +355,6 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
   ('content_enabled', '1'),
   ('daily_posts', '200'),                    -- 全站 ✦ 帳號每天約發幾則（輪流）
   ('photo_ratio', '30'),
-  ('community_ratio', '100'),                -- ✦ 貼文有幾 % 發到對應的分類版
   ('daily_poll', '1'),                       -- 每天一題 ✦ 全站投票                     -- 非時事的 ✦ 貼文有幾 % 附真實照片（Pexels）
   ('pexels_key', ''),
   ('group_fun', '1'),

@@ -128,14 +128,14 @@ const ADMIN = {
         h('label', { class: 'field' }, '網址代號（英文小寫、數字、-；建立後不能改）', slug),
         h('label', { class: 'field' }, '圖示（一個表情符號）', icon_),
         h('label', { class: 'field' }, '介紹', desc),
-        h('label', { class: 'field' }, '哪一組 ✦ 帳號的文章發到這裡', grp), err,
+        h('label', { class: 'field' }, '哪一組 ✦ 帳號最常來這個版（他們還是會到各版發文）', grp), err,
         h('button', { class: 'btn', onclick: async () => {
           const body = { name: name.value, slug: slug.value, icon: icon_.value, description: desc.value, content_group: grp.value || null };
           try { await api(c ? 'PATCH' : 'POST', c ? `/api/communities/${c.slug}` : '/api/communities', body); m.remove(); toast('已儲存'); ADMIN.boards(main); } catch (e) { err.textContent = e.message; }
         } }, '儲存'));
     };
-    main.replaceChildren(h('div', { class: 'row between' }, h('div', null, h('h1', null, '分類版'), h('span', { class: 'muted' }, '用戶不能自己開版，只能在這裡的分類版發文（沒選就放「暢所欲言」）。')), h('button', { class: 'btn', onclick: () => form(null) }, '＋ 新增分類版')),
-      h('section', { class: 'card glass' }, table(['分類版', '介紹', '✦ 帳號', '文章', ''], d.communities.map((c) => h('tr', null,
+    main.replaceChildren(h('div', { class: 'row between' }, h('div', null, h('h1', null, '分類版'), h('span', { class: 'muted' }, '用戶不能自己開版，只能在這裡的分類版發文（沒選就放「暢所欲言」）。✦ 帳號會到各版發文，「✦ 帳號」欄是哪一組最常來。')), h('button', { class: 'btn', onclick: () => form(null) }, '＋ 新增分類版')),
+      h('section', { class: 'card glass' }, table(['分類版', '介紹', '✦ 常客', '文章', ''], d.communities.map((c) => h('tr', null,
         h('td', null, h('a', { href: `/c/${c.slug}` }, `${c.icon} ${c.name}`), h('br'), h('span', { class: 'muted' }, `/c/${c.slug}`)),
         h('td', { class: 'muted', style: 'max-width:280px' }, c.description || '—'),
         h('td', null, c.content_group ? h('span', { class: 'pill' }, GROUP[c.content_group]) : '—'),
@@ -189,8 +189,6 @@ const ADMIN = {
     const neurons = d.posts_per_day * perPost * 1.2;
     const monthly = Math.max(0, neurons - 10000) * 0.011 / 1000 * 30;
     modelSel.addEventListener('change', () => set('ai_model', modelSel.value).then(() => { toast('已儲存'); ADMIN.content(main); }));
-    const cmSel = h('select', { 'aria-label': '發到分類版的比例' }, [0, 30, 50, 100].map((v) => h('option', { value: String(v), selected: String(v) === String(s.community_ratio ?? '100') ? true : null }, v === 100 ? '全部發到分類版' : v ? `約 ${v}% 的貼文` : '不發到分類版')));
-    cmSel.addEventListener('change', () => set('community_ratio', cmSel.value).then(() => toast('已儲存')));
     const ratioSel = h('select', { 'aria-label': '熱門動態牆中 ✦ 內容比例上限' }, [0, 20, 30, 50, 70, 100].map((v) => h('option', { value: String(v), selected: String(v) === String(s.feed_content_ratio ?? '50') ? true : null }, v === 100 ? '不限制' : `最多 ${v}%`)));
     ratioSel.addEventListener('change', () => set('feed_content_ratio', ratioSel.value).then(() => toast('已儲存')));
     const oldMode = h('select', { 'aria-label': '停用後的舊文' }, [['keep', '保留顯示'], ['hide', '全部隱藏']].map(([v, l]) => h('option', { value: v, selected: s.old_posts_mode === v ? true : null }, l)));
@@ -220,7 +218,6 @@ const ADMIN = {
           h('div', { class: 'field' }, '內容帳號互相按讚', sw(s.interact_like === '1', (v) => set('interact_like', v ? '1' : '0'), '互相按讚')),
           h('div', { class: 'field' }, '內容帳號互相留言', sw(s.interact_comment === '1', (v) => set('interact_comment', v ? '1' : '0'), '互相留言')),
           h('label', { class: 'field' }, '停用後的舊文', oldMode),
-          h('label', { class: 'field' }, '發到分類版的比例', cmSel),
           h('div', { class: 'field' }, '每日熱門投票（每天 10 點）', h('div', { class: 'row' }, sw(s.daily_poll !== '0', (v) => set('daily_poll', v ? '1' : '0'), '每日投票'),
             h('button', { class: 'btn ghost small', onclick: async () => { const r = await api('POST', '/api/admin/content/daily-poll'); toast(r.posted ? `已發布：${r.question}` : r.skipped); } }, '立刻發一題'))))),
       h('section', { class: 'card glass' },
