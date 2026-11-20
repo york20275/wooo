@@ -33,6 +33,9 @@ const ICON = {
   image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-8 8"/>',
   pen: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m14 6 4 4"/>',
   poll: '<path d="M5 20V10M12 20V4M19 20v-7"/>',
+  repost: '<path d="M4 9V7a2 2 0 0 1 2-2h12l-3-3M20 15v2a2 2 0 0 1-2 2H6l3 3"/>',
+  bookmark: '<path d="M6 4h12v17l-6-4-6 4z"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6"/>',
   hash: '<path d="M5 9h14M4 15h14M10 3 8 21M16 3l-2 18"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   eyeoff: '<path d="M3 3l18 18"/><path d="M10.6 6.1A10 10 0 0 1 12 6c5 0 9 6 9 6a17 17 0 0 1-3 3.6M6.4 7.4C4.2 9 3 12 3 12s4 6 9 6a9 9 0 0 0 3.6-.8"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
@@ -212,9 +215,10 @@ const dot = (n, label) => (n ? h('span', { class: 'dot', 'aria-label': `${n} ${l
 function sideNav(path) {
   const link = (href, label, extra) => h('a', { href, class: path === href ? 'active' : '' }, label, extra);
   return h('nav', { class: 'side', 'aria-label': '主選單' },
-    link('/', '首頁'), link('/explore', '探索'),
+    link('/', '首頁'), link('/explore', '探索'), link('/communities', '社團'),
     link('/notifications', '通知', dot(S.unread, '則未讀通知')),
     S.me ? link('/messages', '私訊', dot(S.unreadMsg, '則未讀私訊')) : null,
+    S.me ? link('/bookmarks', '收藏') : null,
     S.me ? link(`/u/${S.me.handle}`, '個人頁') : null,
     link('/settings', '設定'),
     S.me?.role === 'gm' ? link('/admin', 'GM 後台') : null);
@@ -222,7 +226,7 @@ function sideNav(path) {
 function bottomNav(path) {
   const link = (href, ic, label, n) => h('a', { href, class: path === href ? 'active' : '', 'aria-label': label }, icon(ic), n ? h('span', { class: 'dot', style: 'position:absolute;top:12px;right:12px' }) : null);
   return h('nav', { class: 'bottom', 'aria-label': '主選單' },
-    link('/', 'home', '首頁'), link('/explore', 'search', '探索'),
+    link('/', 'home', '首頁'), link('/explore', 'search', '探索'), link('/communities', 'users', '社團'),
     S.me ? link('/messages', 'mail', '私訊', S.unreadMsg) : null,
     link('/notifications', 'bell', '通知', S.unread),
     S.me ? link(`/u/${S.me.handle}`, 'user', '個人頁') : link('/settings', 'gear', '設定'));
@@ -236,9 +240,11 @@ function aside() {
   }).catch(() => {});
   return h('aside', { class: 'side' }, box,
     h('p', { class: 'foot' }, h('a', { href: '/about' }, '關於'), ' · ', h('a', { href: '/about#content' }, '✦ 說明'), ' · ', h('a', { href: '/about#rules' }, '社群規範'), h('br'),
-      h('a', { href: '/privacy' }, '隱私權政策'), ' · ', h('a', { href: '/terms' }, '使用條款'), h('br'), '© 2026 窩Woo！'));
+      h('a', { href: '/transparency' }, '透明度報告'), ' · ', h('a', { href: '/privacy' }, '隱私權政策'), ' · ', h('a', { href: '/terms' }, '使用條款'), h('br'), '© 2026 窩Woo！'));
 }
 function shell(path, mainEl) {
+  const banner = typeof statusBanner === 'function' ? statusBanner() : null;
+  if (banner && mainEl.firstChild) mainEl.prepend(banner);
   app.replaceChildren(header(), h('div', { class: 'layout' }, sideNav(path), mainEl, aside()), bottomNav(path));
 }
 const pageTitle = (t) => h('h1', { class: 'ptitle' }, t);
@@ -276,27 +282,8 @@ function pollBox(p) {
 
 function postCard(p, { onDelete, full = false, pinned = false } = {}) {
   const el = h('article', { class: 'post glass' });
-  const likeBtn = h('button', { class: 'icon-btn' });
-  const drawLike = () => { likeBtn.replaceChildren(icon(p.liked ? 'heartFill' : 'heart'), String(p.like_count)); likeBtn.classList.toggle('on', p.liked); likeBtn.setAttribute('aria-pressed', String(p.liked)); likeBtn.setAttribute('aria-label', p.liked ? '收回讚' : '按讚'); };
-  drawLike();
-  likeBtn.addEventListener('click', async () => {
-    if (!S.me) return needLogin();
-    const was = p.liked;
-    p.liked = !was; p.like_count += was ? -1 : 1; drawLike();
-    try { await api(was ? 'DELETE' : 'POST', `/api/posts/${p.id}/like`); }
-    catch (e) { p.liked = was; p.like_count += was ? 1 : -1; drawLike(); toast(e.message); }
-  });
-
-  let media = null;
-  if (p.image_url) {
-    media = h('div', { class: `pimg ${p.sensitive ? 'blur' : ''}` }, h('img', { src: p.image_url, alt: '貼文圖片', loading: 'lazy' }));
-    if (p.image_credit) media.append(h('a', { class: 'credit', href: p.image_credit.url, target: '_blank', rel: 'noopener', onclick: (e) => e.stopPropagation() }, `攝影：${p.image_credit.name}／Pexels`));
-    if (p.sensitive) {
-      const cover = h('button', { class: 'cover', 'aria-label': '敏感內容，點擊查看' }, icon('eyeoff'), h('b', null, '敏感內容'), h('span', null, '發文者已標記 · 點擊查看'));
-      cover.addEventListener('click', () => { media.classList.remove('blur'); cover.remove(); });
-      media.append(cover);
-    }
-  }
+  const likeBtn = reactionControl(p);
+  const media = imageGrid(p);
   const isBlog = p.kind === 'blog';
   let body = p.text;
   let more = null;
@@ -315,14 +302,18 @@ function postCard(p, { onDelete, full = false, pinned = false } = {}) {
     const mine = S.me && S.me.id === p.author.id;
     const item = (label, fn, danger) => h('button', { role: 'menuitem', style: danger ? 'color:#A32D2D' : null, onclick: () => { pop.remove(); fn(); } }, label);
     const pop = h('div', { class: 'pop', role: 'menu' },
-      item('查看按讚名單', () => likesModal(p.id)),
+      S.me ? item(p.bookmarked ? '取消收藏' : '收藏', () => toggleBookmark(p)) : null,
+      item('查看回應名單', () => likesModal(p.id)),
       item('複製連結', async () => { try { await navigator.clipboard.writeText(`${location.origin}/p/${p.id}`); toast('已複製連結'); } catch { toast(`${location.origin}/p/${p.id}`); } }),
       mine ? item(pinned ? '取消置頂' : '置頂到個人頁', async () => { await api('PATCH', '/api/me', { pinned_post_id: pinned ? null : p.id }); toast(pinned ? '已取消置頂' : '已置頂'); render(); }) : null,
       S.me && !mine ? item('檢舉', () => reportModal({ post_id: p.id })) : null,
-      S.me && (mine || S.me.role === 'gm') ? item('刪除', async () => {
+      S.me && mine ? item('刪除', async () => {
         if (!confirm('確定要刪除這篇文章嗎？刪除後無法復原。')) return;
         try { await api('DELETE', `/api/posts/${p.id}`); el.remove(); toast('已刪除'); onDelete?.(); } catch (err) { toast(err.message); }
-      }, true) : null);
+      }, true) : null,
+      S.me && !mine && S.me.role === 'gm' ? item('刪除（GM）', () => reasonModal('刪除這篇文章', async (reason, detail) => {
+        await api('DELETE', `/api/posts/${p.id}`, { reason, detail }); el.remove(); toast('已刪除並通知作者'); onDelete?.();
+      }), true) : null);
     menuWrap.append(pop);
     setTimeout(() => document.addEventListener('click', () => pop.remove(), { once: true }), 0);
   });
@@ -331,28 +322,33 @@ function postCard(p, { onDelete, full = false, pinned = false } = {}) {
   el.append(
     avatar(p.author),
     h('div', { class: 'body' },
+      p.repost ? h('a', { class: 'muted row reposted', href: `/u/${p.repost.by.handle}`, style: 'gap:4px' }, icon('repost'), `${p.repost.by.name} 轉發了`) : null,
       pinned ? h('span', { class: 'muted row', style: 'gap:4px' }, icon('pin'), '置頂文章') : null,
       h('div', { class: 'meta' },
         h('a', { class: 'name', href: `/u/${p.author.handle}` }, p.author.name),
         p.author.is_content ? starButton() : null,
         h('a', { class: 'time', href: `/p/${p.id}`, style: 'text-decoration:none' }, timeAgo(p.created_at)),
-        isBlog ? h('span', { class: 'pill', style: 'margin-left:6px' }, '網誌') : null),
+        isBlog ? h('span', { class: 'pill', style: 'margin-left:6px' }, '網誌') : null,
+        p.is_daily ? h('span', { class: 'pill', style: 'margin-left:6px' }, '今日投票') : null,
+        p.community ? h('a', { class: 'cchip', href: `/c/${p.community.slug}` }, `${p.community.icon} ${p.community.name}`) : null),
       isBlog ? h(full ? 'h1' : 'a', { class: 'blogtitle', href: full ? null : `/p/${p.id}` }, p.title) : null,
       textEl, more,
       p.link ? h('a', { class: 'linkcard', href: p.link.url, target: '_blank', rel: 'noopener nofollow' }, h('small', null, p.link.site || '新聞來源'), h('b', null, p.link.title || p.link.url)) : null,
       p.poll ? pollBox(p) : null,
       media,
+      p.quote ? quoteCard(p.quote) : null,
       h('div', { class: 'actions' }, likeBtn,
         h('a', { class: 'icon-btn', href: `/p/${p.id}`, 'aria-label': '留言' }, icon('chat'), String(p.comment_count)),
+        p.kind !== 'blog' ? repostControl(p) : null,
         menuWrap)));
   return el;
 }
 async function likesModal(id) {
   const list = h('div', { class: 'ulist' }, h('span', { class: 'muted' }, '載入中…'));
-  const m = modal('按讚名單', list);
+  const m = modal('回應名單', list);
   try {
     const d = await api('GET', `/api/posts/${id}/likes`);
-    list.replaceChildren(...(d.users.length ? d.users.map((u) => h('a', { class: 'uitem', href: `/u/${u.handle}`, onclick: () => m.remove() }, avatar(u, 'sm'), h('span', null, u.name), u.is_content ? h('span', { class: 'star', 'aria-label': '平台內容帳號' }, '✦') : null)) : [h('span', { class: 'muted' }, '還沒有人按讚')]));
+    list.replaceChildren(...(d.users.length ? d.users.map((u) => h('a', { class: 'uitem', href: `/u/${u.handle}`, onclick: () => m.remove() }, avatar(u, 'sm'), h('span', null, u.name), u.is_content ? h('span', { class: 'star', 'aria-label': '平台內容帳號' }, '✦') : null, u.emoji ? h('span', { style: 'margin-left:auto;font-size:18px' }, u.emoji) : null)) : [h('span', { class: 'muted' }, '還沒有人回應')]));
   } catch (e) { list.replaceChildren(h('span', { class: 'err' }, e.message)); }
 }
 function reportModal(target) {
@@ -428,13 +424,13 @@ function attachSuggest(ta) {
   return pop;
 }
 
-function composer(onPosted) {
+function composer(onPosted, opts = {}) {
   const ta = h('textarea', { rows: '2', maxlength: '1000', placeholder: '有什麼想說的？用 #標籤、@帳號 都可以' });
   const suggest = attachSuggest(ta);
   const sens = h('input', { type: 'checkbox' });
   const err = h('span', { class: 'err' });
-  let imageKey = null;
-  const pick = imagePicker((k) => { imageKey = k; });
+  const pick = multiImagePicker(4);
+  const csel = communitySelect(opts.communityId ? opts : null);
 
   // 標籤：最多 5 個，發文時加在文末
   let tags = [];
@@ -478,7 +474,7 @@ function composer(onPosted) {
   const send = h('button', { class: 'btn' }, '發布');
   send.addEventListener('click', async () => {
     err.textContent = '';
-    if (!ta.value.trim() && !imageKey) { err.textContent = pollOn ? '請寫下投票的題目' : '寫點什麼或加張圖片吧'; ta.focus(); return; }
+    if (!ta.value.trim() && !pick.keys().length) { err.textContent = pollOn ? '請寫下投票的題目' : '寫點什麼或加張圖片吧'; ta.focus(); return; }
     let poll = null;
     if (pollOn) {
       const options = optInputs.map((x) => x.value.trim()).filter(Boolean);
@@ -488,8 +484,8 @@ function composer(onPosted) {
     const text = ta.value.trim() + (tags.length ? `\n${tags.map((t) => `#${t}`).join(' ')}` : '');
     send.disabled = true;
     try {
-      await api('POST', '/api/posts', { text, image_key: imageKey, sensitive: sens.checked, poll });
-      ta.value = ''; imageKey = null; pick.reset(); sens.checked = false;
+      await api('POST', '/api/posts', { text, image_keys: pick.keys(), sensitive: sens.checked, poll, community_id: csel.value || null });
+      ta.value = ''; pick.reset(); sens.checked = false; if (!opts.communityId) csel.value = '';
       tags = []; tagRow.hidden = true; togglePoll(false);
       toast('已發布'); onPosted?.();
     } catch (e) { err.textContent = e.message; } finally { send.disabled = false; }
@@ -497,7 +493,7 @@ function composer(onPosted) {
   return h('section', { class: 'composer glass', 'aria-label': '發表新文章' }, avatar(S.me),
     h('div', { style: 'flex:1;min-width:0;position:relative' },
       h('label', null, h('span', { class: 'sr' }, '文章內容'), ta), suggest, pollEditor, tagRow, pick.preview, err, pick.err,
-      h('div', { class: 'row wrap' }, pick.btn, pick.file, pollBtn, tagBtn,
+      h('div', { class: 'row wrap' }, pick.btn, pick.file, pollBtn, tagBtn, csel,
         h('button', { class: 'icon-btn', style: 'color:var(--primary)', onclick: () => blogEditor(onPosted) }, icon('pen'), '寫網誌'),
         h('label', { class: 'check' }, sens, '標記敏感'),
         h('span', { style: 'flex:1' }), send)));
@@ -554,7 +550,9 @@ function feedPage() {
   const tab = (key, label) => h('button', { class: S.feedTab === key ? 'on' : '', role: 'tab', 'aria-selected': String(S.feedTab === key), onclick: () => { S.feedTab = key; render(); } }, label);
   const main = h('main', { class: 'main' },
     S.me ? composer(() => pl.load(true)) : h('div', { class: 'card glass' }, h('h2', null, '歡迎來到窩Woo！'), h('p', { style: 'margin:0' }, '一個可以慵懶窩著、隨意分享日常的地方。'), loginButton()),
+    storiesBar(),
     h('div', { class: 'tabs', role: 'tablist', 'aria-label': '動態牆' }, tab('following', '追蹤中'), tab('hot', '熱門')),
+    S.feedTab === 'hot' ? dailyPollCard() : null,
     pl.el);
   shell('/', main);
   pl.load(true);
@@ -589,7 +587,8 @@ async function postPage(id) {
         S.me && !isReply ? h('button', { class: 'icon-btn', onclick: () => { if (wrap.querySelector('.composer')) return; wrap.append(commentForm(c, () => wrap.querySelector('.composer')?.remove())); } }, '回覆') : null,
         S.me && isReply ? h('button', { class: 'icon-btn', onclick: () => { const holder = wrap.parentElement; if (holder.querySelector(':scope > .composer')) return; holder.append(commentForm(c, () => holder.querySelector(':scope > .composer')?.remove())); } }, '回覆') : null,
         S.me && S.me.id !== c.author.id ? h('button', { class: 'icon-btn', onclick: () => reportModal({ comment_id: c.id }) }, '檢舉') : null,
-        S.me && (S.me.id === c.author.id || S.me.role === 'gm') ? h('button', { class: 'icon-btn', onclick: async () => { if (!confirm('刪除這則留言？')) return; try { await api('DELETE', `/api/comments/${c.id}`); postPage(id); } catch (e) { toast(e.message); } } }, '刪除') : null);
+        S.me && S.me.id === c.author.id ? h('button', { class: 'icon-btn', onclick: async () => { if (!confirm('刪除這則留言？')) return; try { await api('DELETE', `/api/comments/${c.id}`); postPage(id); } catch (e) { toast(e.message); } } }, '刪除') : null,
+        S.me && S.me.id !== c.author.id && S.me.role === 'gm' ? h('button', { class: 'icon-btn', onclick: () => reasonModal('刪除這則留言', async (reason, detail) => { await api('DELETE', `/api/comments/${c.id}`, { reason, detail }); toast('已刪除並通知作者'); postPage(id); }) }, '刪除（GM）') : null);
       wrap.append(h('div', { class: 'post glass', style: `padding:12px 16px;${isReply ? 'margin-left:44px' : ''}` }, avatar(c.author, 'sm'),
         h('div', { class: 'body' },
           h('div', { class: 'meta' }, h('a', { class: 'name', href: `/u/${c.author.handle}`, style: 'font-size:14px' }, c.author.name), c.author.is_content ? starButton() : null, h('span', { class: 'time' }, timeAgo(c.created_at)), actions),
@@ -647,6 +646,7 @@ async function profilePage(handle, tab) {
     const head = h('section', { class: 'card glass profile', style: `--paccent:${accent}` }, banner,
       h('div', { class: 'row between', style: 'margin-top:-56px;align-items:flex-end;position:relative;z-index:1' }, h('span', { class: 'avatar lg ring' }, u.avatar_url ? h('img', { src: u.avatar_url, alt: '' }) : u.name.slice(0, 1)), actions),
       h('div', null, h('h1', { style: 'font-size:22px' }, u.name, u.is_content ? starButton() : null), h('span', { class: 'muted' }, `@${u.handle}`)),
+      badgeRow(d.badges),
       u.is_content ? h('p', { class: 'notice', style: 'margin:0;font-size:13px' }, '✦ 這是平台內容帳號，由窩Woo！自動發布內容。') : null,
       d.blocked ? h('p', { class: 'notice', style: 'margin:0;font-size:13px' }, '你已封鎖這位用戶。') : null,
       d.blocked_me ? h('p', { class: 'notice', style: 'margin:0;font-size:13px' }, '你無法查看這位用戶的內容。') : null,
@@ -779,9 +779,13 @@ async function notificationsPage() {
   main.append(h('div', { class: 'empty' }, '載入中…'));
   try {
     const d = await api('GET', '/api/notifications');
-    const label = { like: '按讚了你的文章', comment: '留言了你的文章', reply: '回覆了你的留言', mention: '在文章或留言中提到你', follow: '開始追蹤你' };
+    const label = { like: '回應了你的文章', comment: '留言了你的文章', reply: '回覆了你的留言', mention: '在文章或留言中提到你', follow: '開始追蹤你', repost: '轉發了你的文章', quote: '引用了你的文章' };
+    const sys = { moderation: '你的內容被處理了，點這裡看原因或申訴', appeal: '你的申訴有結果了' };
     main.replaceChildren(pageTitle('通知'),
-      ...(d.notifications.length ? d.notifications.map((n) => h('a', { class: 'post glass', href: n.post_id ? `/p/${n.post_id}` : `/u/${n.actor.handle}`, style: `text-decoration:none;padding:12px 16px;align-items:center;${n.read ? '' : 'border-color:var(--accent)'}` },
+      ...(d.notifications.length ? d.notifications.map((n) => sys[n.type]
+        ? h('a', { class: 'post glass', href: '/moderation', style: `text-decoration:none;padding:12px 16px;align-items:center;${n.read ? '' : 'border-color:var(--accent)'}` },
+          h('span', { class: 'avatar sm', style: 'background:var(--primary);color:#fff' }, '🛡️'), h('span', null, h('b', null, '窩Woo！管理團隊'), ' ', sys[n.type]), h('span', { class: 'time', style: 'margin-left:auto' }, timeAgo(n.created_at)))
+        : h('a', { class: 'post glass', href: n.post_id ? `/p/${n.post_id}` : `/u/${n.actor.handle}`, style: `text-decoration:none;padding:12px 16px;align-items:center;${n.read ? '' : 'border-color:var(--accent)'}` },
         avatar(n.actor, 'sm'), h('span', null, h('b', null, n.actor.name), n.actor.is_content ? ' ✦' : '', ' ', label[n.type] || ''), h('span', { class: 'time', style: 'margin-left:auto' }, timeAgo(n.created_at))))
         : [h('div', { class: 'empty glass' }, '目前沒有通知')]));
     if (S.unread) { await api('POST', '/api/notifications/read'); S.unread = 0; }
@@ -963,7 +967,8 @@ async function settingsPage() {
     h('section', { class: 'card glass' }, h('h2', null, '顯示'),
       h('label', { class: 'row between' }, '卡片透明度', op),
       h('div', { class: 'row between' }, '文字大小', h('div', { class: 'row' }, sizeBtn(!large, '標準'), sizeBtn(large, '大')))),
-    sensitive, notifySec, account);
+    mutedSection(), sensitive, notifySec, account,
+    S.me ? h('section', { class: 'card glass' }, h('h2', null, '處理紀錄與申訴'), h('span', { class: 'muted' }, '如果你的內容或帳號曾被管理團隊處理，原因和申訴都在這裡。'), h('a', { class: 'btn ghost small', href: '/moderation', style: 'align-self:flex-start' }, '查看處理紀錄')) : null);
   shell('/settings', main);
 }
 function deleteAccountModal() {
@@ -1013,6 +1018,13 @@ async function onboarding() {
 function aboutPage() {
   shell('/about', h('main', { class: 'main' },
     h('section', { class: 'card glass' }, h('h1', null, '關於窩Woo！'), h('p', { style: 'margin:0' }, '窩Woo！是一個可以慵懶窩著、隨意分享日常的社群：短短的動態、長長的網誌、一本本相簿，都歡迎。')),
+    h('section', { class: 'card glass' }, h('h2', null, '說你想說的，不怕被消失'),
+      h('p', { style: 'margin:0' }, '我們主張言論自由、暢所欲言。不會因為觀點或立場刪文，也不會無預警封號。'),
+      h('ul', { class: 'list' },
+        h('li', null, '只處理違法或嚴重違反社群規範的內容，規則寫在下面，看得到。'),
+        h('li', null, '每次處理都會通知本人、說明原因。'),
+        h('li', null, '處理後 30 天內都可以申訴，由真人審查。'),
+        h('li', null, '每個月公開處理統計：', h('a', { href: '/transparency' }, '透明度報告'), '。'))),
     h('section', { class: 'card glass', id: 'content' }, h('h2', null, '✦ 平台內容帳號是什麼？'),
       h('p', { style: 'margin:0' }, '名稱旁邊有 ✦ 的帳號是「平台內容帳號」，由窩Woo！自動發布時事、遊戲、生活等內容，讓大家一進來就有東西可以看。這些帳號不是個人用戶，也不會主動和你互動或接收私訊。'),
       h('p', { style: 'margin:0' }, '時事類內容是根據新聞來源整理的重點摘要，並附上原文連結，完整內容請以原文為準。')),

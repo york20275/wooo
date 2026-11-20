@@ -1,6 +1,6 @@
 /* 窩Woo！Service Worker：離線外框快取 + 推播通知 */
-const CACHE = 'woo-v3';
-const SHELL = ['/', '/style.css', '/app.js', '/admin.js', '/manifest.webmanifest', '/icon-192.png'];
+const CACHE = 'woo-v4';
+const SHELL = ['/', '/style.css', '/app.js', '/more.js', '/admin.js', '/manifest.webmanifest', '/icon-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

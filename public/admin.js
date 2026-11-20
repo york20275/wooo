@@ -3,7 +3,7 @@
 
 async function adminPage(tab) {
   if (!S.me || S.me.role !== 'gm') { shell('', h('main', { class: 'main' }, h('div', { class: 'empty glass' }, '只有 GM 可以使用後台'))); return; }
-  const tabs = [['dashboard', '儀表板'], ['users', '用戶管理'], ['posts', '內容管理'], ['reports', '檢舉處理'], ['content', '✦ 內容帳號'], ['news', '新聞來源'], ['audit', '操作紀錄']];
+  const tabs = [['dashboard', '儀表板'], ['users', '用戶管理'], ['posts', '內容管理'], ['reports', '檢舉處理'], ['appeals', '申訴'], ['content', '✦ 內容帳號'], ['news', '新聞來源'], ['audit', '操作紀錄']];
   const nav = h('nav', { 'aria-label': '後台選單' },
     h('a', { href: '/', style: 'margin-bottom:12px' }, '← 回到網站'),
     tabs.map(([k, l]) => h('a', { href: k === 'dashboard' ? '/admin' : `/admin/${k}`, class: tab === k ? 'active' : '' }, l)));
@@ -63,7 +63,14 @@ const ADMIN = {
       h('section', { class: 'card glass' }, table(['用戶', 'Email', '角色', '年齡驗證', '文章', '加入', '狀態', ''], d.users.map((u) => {
         const self = u.id === S.me.id;
         const sel = h('select', { 'aria-label': `${u.name} 的狀態`, disabled: self ? true : null }, Object.entries(statusLabel).map(([v, l]) => h('option', { value: v, selected: u.status === v ? true : null }, l)));
-        sel.addEventListener('change', async () => { if (sel.value === 'banned' && !confirm(`確定封鎖 ${u.name}？`)) { sel.value = u.status; return; } try { await api('POST', `/api/admin/users/${u.id}/status`, { status: sel.value }); u.status = sel.value; toast('已更新'); } catch (e) { toast(e.message); sel.value = u.status; } });
+        sel.addEventListener('change', async () => {
+          const next = sel.value;
+          if (next === 'active') { try { await api('POST', `/api/admin/users/${u.id}/status`, { status: next }); u.status = next; toast('已恢復'); } catch (e) { toast(e.message); sel.value = u.status; } return; }
+          sel.value = u.status;
+          const m = reasonModal(`${next === 'banned' ? '停權' : '暫停'} ${u.name}`, async (reason, detail) => {
+            await api('POST', `/api/admin/users/${u.id}/status`, { status: next, reason, detail }); u.status = next; sel.value = next; toast('已處理並通知本人');
+          });
+        });
         const role = h('select', { 'aria-label': `${u.name} 的角色`, disabled: self ? true : null }, [['user', '用戶'], ['gm', 'GM']].map(([v, l]) => h('option', { value: v, selected: u.role === v ? true : null }, l)));
         role.addEventListener('change', async () => { if (role.value === 'gm' && !confirm(`確定讓 ${u.name} 成為 GM？GM 可以管理所有內容與用戶。`)) { role.value = u.role; return; } try { await api('POST', `/api/admin/users/${u.id}/role`, { role: role.value }); u.role = role.value; toast('已更新'); } catch (e) { toast(e.message); role.value = u.role; } });
         return h('tr', null, h('td', null, h('a', { href: `/u/${u.handle}` }, u.name), h('br'), h('span', { class: 'muted' }, `@${u.handle}`)), h('td', null, u.email || '—'), h('td', null, role),
@@ -74,7 +81,11 @@ const ADMIN = {
   async posts(main) {
     const src = new URLSearchParams(location.search).get('source') || '';
     const d = await api('GET', `/api/admin/posts${src ? `?source=${src}` : ''}`);
-    const act = async (id, action) => { if (action === 'delete' && !confirm('確定刪除？無法復原。')) return; await api('POST', `/api/admin/posts/${id}`, { action }); ADMIN.posts(main); };
+    const NAMES = { hide: '隱藏', delete: '刪除', mark_sensitive: '標記敏感' };
+    const act = async (id, action) => {
+      if (action === 'unhide') { await api('POST', `/api/admin/posts/${id}`, { action }); return ADMIN.posts(main); }
+      reasonModal(`${NAMES[action]}這篇文章`, async (reason, detail) => { await api('POST', `/api/admin/posts/${id}`, { action, reason, detail }); toast('已處理並通知作者'); ADMIN.posts(main); }, action === 'mark_sensitive' ? 'unmarked_sensitive' : '');
+    };
     const f = (v, l) => h('button', { class: src === v ? 'on' : '', onclick: () => navigate(`/admin/posts${v ? `?source=${v}` : ''}`) }, l);
     main.replaceChildren(h('h1', null, '內容管理'), h('div', { class: 'tabs' }, f('', '全部'), f('user', '真人'), f('content', '✦ 內容帳號')),
       h('section', { class: 'card glass' }, table(['作者', '內容', '讚（真人）', '留言', '時間', '狀態', '處理'], d.posts.map((p) => h('tr', null,
@@ -88,15 +99,42 @@ const ADMIN = {
   async reports(main) {
     const st = new URLSearchParams(location.search).get('status') || 'open';
     const d = await api('GET', `/api/admin/reports?status=${st}`);
-    const act = async (id, action) => { await api('POST', `/api/admin/reports/${id}`, { action }); toast('已處理'); ADMIN.reports(main); };
+    const MAP = { spam: 'spam', harassment: 'harassment', unmarked_sensitive: 'unmarked_sensitive', copyright: 'copyright', illegal: 'illegal', other: 'other' };
+    const act = async (id, action, rr) => {
+      if (action === 'dismiss') { await api('POST', `/api/admin/reports/${id}`, { action }); toast('已略過'); return ADMIN.reports(main); }
+      reasonModal(action === 'hide' ? '隱藏被檢舉的內容' : '標記為敏感內容', async (reason, detail) => { await api('POST', `/api/admin/reports/${id}`, { action, reason, detail }); toast('已處理並通知本人'); ADMIN.reports(main); }, action === 'mark_sensitive' ? 'unmarked_sensitive' : MAP[rr] || 'other');
+    };
     const f = (v, l) => h('button', { class: st === v ? 'on' : '', onclick: () => navigate(`/admin/reports?status=${v}`) }, l);
     main.replaceChildren(h('h1', null, '檢舉處理'), h('div', { class: 'tabs' }, f('open', '待處理'), f('resolved', '已處理'), f('dismissed', '已略過')),
       h('section', { class: 'card glass' }, d.reports.length ? table(['時間', '被檢舉內容', '原因', '次數', '處理'], d.reports.map((r) => h('tr', null,
         h('td', null, fmt(r.created_at)), h('td', { style: 'max-width:300px' }, r.post_id ? h('a', { href: `/p/${r.post_id}` }, (r.content || '（已刪除）').slice(0, 60)) : (r.content || '（已刪除）').slice(0, 60), r.detail ? h('div', { class: 'muted' }, `補充：${r.detail}`) : null),
         h('td', null, h('span', { class: 'pill warn' }, REASON[r.reason] || r.reason)), h('td', null, r.count),
-        h('td', { style: 'white-space:nowrap' }, st === 'open' ? [h('button', { class: 'btn small', onclick: () => act(r.id, 'hide') }, '隱藏'), ' ',
-          r.post_id ? h('button', { class: 'btn ghost small', onclick: () => act(r.id, 'mark_sensitive') }, '標記敏感') : null, ' ',
+        h('td', { style: 'white-space:nowrap' }, st === 'open' ? [h('button', { class: 'btn small', onclick: () => act(r.id, 'hide', r.reason) }, '隱藏'), ' ',
+          r.post_id ? h('button', { class: 'btn ghost small', onclick: () => act(r.id, 'mark_sensitive', r.reason) }, '標記敏感') : null, ' ',
           h('button', { class: 'btn ghost small', onclick: () => act(r.id, 'dismiss') }, '略過')] : '—')))) : h('div', { class: 'empty' }, '沒有檢舉')));
+  },
+  async appeals(main) {
+    const st = new URLSearchParams(location.search).get('status') || 'pending';
+    const d = await api('GET', `/api/admin/appeals?status=${st}`);
+    const f = (v, l) => h('button', { class: st === v ? 'on' : '', onclick: () => navigate(`/admin/appeals?status=${v}`) }, l);
+    const T = { post: '文章', comment: '留言', account: '帳號' };
+    const card = (x) => {
+      const reply = h('textarea', { rows: '2', maxlength: '500', placeholder: '回覆申訴人（選填，對方會看到）' });
+      const decide = async (decision) => {
+        if (decision === 'accept' && !confirm('接受申訴並撤銷處理？')) return;
+        try { const r = await api('POST', `/api/admin/appeals/${x.id}`, { decision, reply: reply.value }); toast(decision === 'accept' ? (r.reversed ? '已接受並恢復' : '已接受（刪除的內容無法恢復）') : '已駁回'); ADMIN.appeals(main); } catch (e) { toast(e.message); }
+      };
+      return h('section', { class: 'card glass' },
+        h('div', { class: 'row between wrap' }, h('b', null, h('a', { href: `/u/${x.user.handle}` }, x.user.name), ` 的${T[x.target_type]}被${x.action_label}`), h('span', { class: 'muted' }, `申訴時間 ${fmt(x.appealed_at)}`)),
+        h('div', null, h('span', { class: 'muted' }, '處理原因：'), x.reason_label, x.detail ? h('span', { class: 'muted' }, `（${x.detail}）`) : null, h('span', { class: 'muted' }, ` · 處理時間 ${fmt(x.created_at)}`)),
+        x.snapshot ? h('blockquote', { class: 'snap' }, x.snapshot) : null,
+        h('div', null, h('span', { class: 'muted' }, '申訴理由：'), x.appeal_text),
+        st === 'pending' ? [reply, h('div', { class: 'row' }, h('button', { class: 'btn small', onclick: () => decide('accept') }, '接受（撤銷處理）'), h('button', { class: 'btn ghost small', onclick: () => decide('reject') }, '駁回（維持處理）'))]
+          : h('div', null, h('span', { class: 'muted' }, '回覆：'), x.appeal_reply || '—'));
+    };
+    main.replaceChildren(h('h1', null, '申訴'), h('span', { class: 'muted' }, '用戶被處理後 30 天內可以申訴。接受申訴會自動撤銷隱藏、敏感標記或停權；刪除的內容無法恢復，但會記錄為誤判並計入透明度報告。'),
+      h('div', { class: 'tabs' }, f('pending', '待處理'), f('accepted', '已接受'), f('rejected', '已駁回')),
+      ...(d.appeals.length ? d.appeals.map(card) : [h('div', { class: 'empty glass' }, '沒有申訴')]));
   },
   async content(main) {
     const g = new URLSearchParams(location.search).get('group') || '';
@@ -121,6 +159,8 @@ const ADMIN = {
     const neurons = d.posts_per_day * perPost * 1.2;
     const monthly = Math.max(0, neurons - 10000) * 0.011 / 1000 * 30;
     modelSel.addEventListener('change', () => set('ai_model', modelSel.value).then(() => { toast('已儲存'); ADMIN.content(main); }));
+    const cmSel = h('select', { 'aria-label': '發到官方社團的比例' }, [0, 10, 30, 50, 100].map((v) => h('option', { value: String(v), selected: String(v) === String(s.community_ratio ?? '30') ? true : null }, v ? `約 ${v}% 的貼文` : '不發到社團')));
+    cmSel.addEventListener('change', () => set('community_ratio', cmSel.value).then(() => toast('已儲存')));
     const ratioSel = h('select', { 'aria-label': '熱門動態牆中 ✦ 內容比例上限' }, [0, 20, 30, 50, 70, 100].map((v) => h('option', { value: String(v), selected: String(v) === String(s.feed_content_ratio ?? '50') ? true : null }, v === 100 ? '不限制' : `最多 ${v}%`)));
     ratioSel.addEventListener('change', () => set('feed_content_ratio', ratioSel.value).then(() => toast('已儲存')));
     const oldMode = h('select', { 'aria-label': '停用後的舊文' }, [['keep', '保留顯示'], ['hide', '全部隱藏']].map(([v, l]) => h('option', { value: v, selected: s.old_posts_mode === v ? true : null }, l)));
@@ -149,7 +189,10 @@ const ADMIN = {
           h('label', { class: 'field' }, '熱門動態牆 ✦ 比例上限', ratioSel),
           h('div', { class: 'field' }, '內容帳號互相按讚', sw(s.interact_like === '1', (v) => set('interact_like', v ? '1' : '0'), '互相按讚')),
           h('div', { class: 'field' }, '內容帳號互相留言', sw(s.interact_comment === '1', (v) => set('interact_comment', v ? '1' : '0'), '互相留言')),
-          h('label', { class: 'field' }, '停用後的舊文', oldMode))),
+          h('label', { class: 'field' }, '停用後的舊文', oldMode),
+          h('label', { class: 'field' }, '發到官方社團的比例', cmSel),
+          h('div', { class: 'field' }, '每日熱門投票（每天 10 點）', h('div', { class: 'row' }, sw(s.daily_poll !== '0', (v) => set('daily_poll', v ? '1' : '0'), '每日投票'),
+            h('button', { class: 'btn ghost small', onclick: async () => { const r = await api('POST', '/api/admin/content/daily-poll'); toast(r.posted ? `已發布：${r.question}` : r.skipped); } }, '立刻發一題'))))),
       h('section', { class: 'card glass' },
         h('div', { class: 'tabs' }, f('', '全部'), f('news', '時事'), f('game', '遊戲'), f('mixed', '綜合'), f('fun', '趣事')),
         table(['帳號', '分組', '個性／主題', '文章', '上次發文', '啟用', ''], d.accounts.map((a) => h('tr', null,
@@ -178,7 +221,7 @@ const ADMIN = {
   },
   async audit(main) {
     const d = await api('GET', '/api/admin/audit');
-    const LABEL = { 'user_status:active': '恢復帳號', 'user_status:suspended': '停權', 'user_status:banned': '封鎖', 'user_role:gm': '設為 GM', 'user_role:user': '取消 GM', user_delete: '刪除帳號', post_hide: '隱藏文章', post_unhide: '取消隱藏', post_mark_sensitive: '標記敏感', post_delete: '刪除文章', report_hide: '檢舉：隱藏', report_mark_sensitive: '檢舉：標記敏感', report_dismiss: '檢舉：略過', content_account_edit: '編輯內容帳號', content_disable_all: '停用全部內容帳號', setting: '修改設定' };
+    const LABEL = { 'user_status:active': '恢復帳號', 'user_status:suspended': '停權', 'user_status:banned': '封鎖', 'user_role:gm': '設為 GM', 'user_role:user': '取消 GM', user_delete: '刪除帳號', post_hide: '隱藏文章', post_unhide: '取消隱藏', post_mark_sensitive: '標記敏感', post_delete: '刪除文章', report_hide: '檢舉：隱藏', report_mark_sensitive: '檢舉：標記敏感', report_dismiss: '檢舉：略過', content_account_edit: '編輯內容帳號', content_disable_all: '停用全部內容帳號', setting: '修改設定', appeal_accept: '申訴：接受', appeal_reject: '申訴：駁回', comment_delete: '刪除留言', community_delete: '刪除社團', daily_poll_now: '發每日投票' };
     main.replaceChildren(h('h1', null, '操作紀錄'), h('span', { class: 'muted' }, '所有 GM 的管理操作都會記錄在這裡（最近 200 筆）。'),
       h('section', { class: 'card glass' }, d.items.length ? table(['時間', 'GM', '動作', '對象', '說明'], d.items.map((x) => h('tr', null, h('td', null, fmt(x.created_at)), h('td', null, x.gm || '—'), h('td', null, LABEL[x.action] || x.action), h('td', { class: 'muted' }, x.target || '—'), h('td', { class: 'muted', style: 'max-width:260px' }, x.detail || '')))) : h('div', { class: 'empty' }, '還沒有紀錄')));
   },

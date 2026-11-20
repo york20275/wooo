@@ -4,6 +4,7 @@ import { BASE_RULES, generate } from './ai';
 import { fetchNews as fetchNewsImpl, takeNews, type NewsItem } from './news';
 import { addComment, addLike } from './api';
 import { findPhoto, splitPhotoLine, topicQuery } from './photos';
+import { cleanupStories, runDailyPoll } from './features';
 
 export const fetchNews = fetchNewsImpl;
 export const GROUPS = ['news', 'game', 'mixed', 'fun'] as const;
@@ -56,7 +57,7 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
   ]);
 }
 
-async function postOne(env: Env, model: string, a: Account, photoRatio: number): Promise<string | null> {
+async function postOne(env: Env, model: string, a: Account, photoRatio: number, communityRatio = 0): Promise<string | null> {
   // 不論成功與否都排到隊伍最後面，下一則換別人（輪流）
   const toBack = env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(now(), a.id);
   let news: NewsItem | null = null;
@@ -75,12 +76,17 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number):
   if (!text) { await toBack.run(); return null; }
   // 照片找不到就只發文字，不影響發文
   const photo = wantPhoto ? await findPhoto(env, query || topicQuery(a.persona)).catch(() => null) : null;
+  // 部分文章發到對應的官方社團（例如遊戲帳號 → 遊戲閒聊）
+  const cm = Math.random() * 100 < communityRatio
+    ? await env.DB.prepare('SELECT id FROM communities WHERE official = 1 AND content_group = ? LIMIT 1').bind(a.content_group).first<{ id: string }>()
+    : null;
   const id = newId();
   const t = now();
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO posts (id, user_id, text, image_key, image_credit, image_credit_url, link_url, link_title, link_site, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'content', ?)`)
-      .bind(id, a.id, text.slice(0, 1000), photo?.key ?? null, photo?.credit ?? null, photo?.creditUrl ?? null, news?.url ?? null, news?.title ?? null, news ? siteOf(news.url, news.source) : null, t),
+    env.DB.prepare(`INSERT INTO posts (id, user_id, text, image_key, image_credit, image_credit_url, link_url, link_title, link_site, community_id, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'content', ?)`)
+      .bind(id, a.id, text.slice(0, 1000), photo?.key ?? null, photo?.credit ?? null, photo?.creditUrl ?? null, news?.url ?? null, news?.title ?? null, news ? siteOf(news.url, news.source) : null, cm?.id ?? null, t),
     env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(t, a.id),
+    ...(cm ? [env.DB.prepare('UPDATE communities SET post_count = post_count + 1 WHERE id = ?').bind(cm.id)] : []),
   ]);
   return id;
 }
@@ -115,7 +121,7 @@ export async function runPostTick(env: Env, opts: { force?: boolean } = {}) {
     const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM news_cache WHERE used = 0 AND fetched_at > ?').bind(now() - 36 * 3600_000).first<{ n: number }>();
     if (!left?.n) await fetchNewsImpl(env);
   }
-  const results = await Promise.all(due.results.map((a) => postOne(env, model, a, Number(s.photo_ratio ?? 30)).catch(() => null)));
+  const results = await Promise.all(due.results.map((a) => postOne(env, model, a, Number(s.photo_ratio ?? 30), Number(s.community_ratio ?? 30)).catch(() => null)));
   const posted = results.filter(Boolean).length;
   if (posted) await logContent(env.DB, 'post', null, `發文 ${posted} 則（${due.results.filter((_, i) => results[i]).map((a) => a.name).join('、')}）`);
   return posted ? { posted: results.find(Boolean), account: due.results[results.findIndex(Boolean)].name, count: posted } : { skipped: '這次沒有成功發文（可能沒有新聞或 AI 失敗）' };
@@ -126,8 +132,8 @@ export async function runInteractTick(env: Env) {
   const s = await getSettings(env.DB);
   if (s.content_enabled !== '1' || Number(s.paused_until || 0) > now()) return;
   const recent = await env.DB.prepare(
-    "SELECT p.id, p.user_id, p.text FROM posts p WHERE p.source = 'content' AND p.hidden = 0 AND p.created_at > ? ORDER BY RANDOM() LIMIT 8"
-  ).bind(now() - 24 * 3600_000).all<{ id: string; user_id: string; text: string }>();
+    "SELECT p.id, p.user_id, p.text, u.content_group AS g FROM posts p JOIN users u ON u.id = p.user_id WHERE p.source = 'content' AND p.hidden = 0 AND p.kind = 'post' AND p.created_at > ? ORDER BY RANDOM() LIMIT 8"
+  ).bind(now() - 24 * 3600_000).all<{ id: string; user_id: string; text: string; g: string }>();
   if (!recent.results.length) return;
   const likers = await env.DB.prepare('SELECT id FROM users WHERE is_content = 1 AND content_enabled = 1 ORDER BY RANDOM() LIMIT 8').all<{ id: string }>();
 
@@ -137,7 +143,9 @@ export async function runInteractTick(env: Env) {
   if (s.interact_like === '1' && likes) {
     await Promise.all(recent.results.slice(0, likes).map((p, i) => {
       const liker = likers.results[i];
-      return liker && liker.id !== p.user_id ? addLike(env, p.id, { id: liker.id, is_content: 1 }) : null;
+      // 趣事文多半回 😂，其他大多是 ❤️
+      const emoji = p.g === 'fun' ? (Math.random() < 0.6 ? '😂' : '❤️') : Math.random() < 0.85 ? '❤️' : pick(['😂', '😮']);
+      return liker && liker.id !== p.user_id ? addLike(env, p.id, { id: liker.id, is_content: 1 }, undefined, emoji) : null;
     }));
   }
   if (s.interact_comment === '1' && Math.random() < Math.min(1, daily / 3 / 1440)) {
@@ -156,8 +164,12 @@ export async function runInteractTick(env: Env) {
 export async function handleCron(env: Env, _cron: string) {
   await runPostTick(env).catch((e) => console.log('post tick', String(e)));
   await runInteractTick(env).catch((e) => console.log('interact tick', String(e)));
-  const m = new Date().getUTCMinutes();
+  const d = new Date();
+  const m = d.getUTCMinutes();
   if (m === 0 || m === 30) await fetchNewsImpl(env).catch(() => {});
+  // 每日投票：台灣時間 10:00 起每 10 分鐘檢查一次（今天發過就跳過）
+  if (d.getUTCHours() >= 2 && d.getUTCHours() < 14 && m % 10 === 0) await runDailyPoll(env).catch((e) => console.log('daily poll', String(e)));
+  if (m % 10 === 3) await cleanupStories(env).catch((e) => console.log('stories cleanup', String(e)));
   if (m === 5) {
     // 清理：兩天前的訪客紀錄、過期的登入、90 天前的每日活躍、30 天前的內容紀錄
     const day = (d: number) => new Date(Date.now() - d * 86400_000 + 8 * 3600_000).toISOString().slice(0, 10);

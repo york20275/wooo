@@ -10,7 +10,8 @@ export async function loadUser(env: Env, sid: string | undefined): Promise<User 
   const row = await env.DB.prepare(
     'SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.expires_at > ?'
   ).bind(sid, now()).first<User>();
-  if (!row || row.status === 'banned') return null;
+  // 被停權的人仍可登入：只能看自己的處理紀錄並申訴，不能發文互動（requireUser 會擋）
+  if (!row) return null;
   return row;
 }
 
@@ -96,9 +97,8 @@ auth.get('/google/callback', async (c) => {
   const info = (await infoRes.json()) as { sub: string; email: string; email_verified?: boolean; name?: string };
   if (!info.email_verified) return c.text('這個 Google 帳號的 Email 尚未驗證', 403);
   const user = await upsertGoogleUser(c.env, info.sub, info.email, info.name || '');
-  if (user.status === 'banned') return c.text('這個帳號已被停權', 403);
   await startSession(c, user.id);
-  return c.redirect('/');
+  return c.redirect(user.status === 'active' ? '/' : '/moderation');
 });
 
 /** 本機測試登入：只有 DEV_MODE=1 才能用 */

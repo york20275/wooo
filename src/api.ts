@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import type { AppEnv, Env, User } from './env';
-import { canSeeSensitive, findMentions, getSetting, imgUrl, isBlockedEither, newId, now, twDay } from './env';
+import { canSeeSensitive, findMentions, getSetting, imgUrl, isBlockedEither, logAudit, newId, now, twDay } from './env';
+import { cleanReason, MOD_REASONS, recordAction } from './moderation';
+import { badgesFor } from './features';
 import { notify } from './notify';
 
 export const api = new Hono<AppEnv>();
@@ -31,7 +33,7 @@ export function requireHuman(c: any, u: User) {
   if (needsHumanCheck(c.env, u)) throw new HttpError(428, '請先完成人機驗證');
 }
 
-const POST_COLS = `p.id, p.text, p.title, p.kind, p.image_key, p.image_credit, p.image_credit_url, p.link_url, p.link_title, p.link_site, p.sensitive, p.source,
+export const POST_COLS = `p.id, p.user_id, p.text, p.title, p.kind, p.image_key, p.images, p.repost_of, p.quote_of, p.repost_count, p.community_id, p.is_daily, p.image_credit, p.image_credit_url, p.link_url, p.link_title, p.link_site, p.sensitive, p.source,
   p.like_count, p.comment_count, p.created_at,
   u.id AS author_id, u.name AS author_name, u.handle AS author_handle, u.avatar_key AS author_avatar, u.is_content AS author_is_content`;
 
@@ -54,43 +56,87 @@ export function mixContent<T extends { source: string }>(ranked: T[], ratio: num
   return out.concat(waiting);
 }
 
-export function serializePost(r: any, likedSet?: Set<string>, polls?: Map<string, any>) {
+export const REACTIONS = ['❤️', '😂', '😮', '😢', '😡'];
+export const pubUser = (x: any) => ({ id: x.id, name: x.name, handle: x.handle, avatar_url: imgUrl(x.avatar_key), is_content: !!x.is_content });
+
+function imageKeys(r: any): string[] {
+  if (r.images) { try { const a = JSON.parse(r.images); if (Array.isArray(a) && a.length) return a.slice(0, 4); } catch {} }
+  return r.image_key ? [r.image_key] : [];
+}
+
+interface Ctx { reactions: Map<string, string>; summary: Map<string, { emoji: string; n: number }[]>; bookmarks: Set<string>; polls: Map<string, any>; communities: Map<string, any> }
+
+export function serializePost(r: any, ctx?: Ctx) {
+  const imgs = imageKeys(r).map((k) => imgUrl(k)!);
+  const reaction = ctx?.reactions.get(r.id) ?? null;
   return {
     id: r.id,
     kind: r.kind || 'post',
     title: r.title || null,
     text: r.text,
-    image_url: imgUrl(r.image_key),
+    image_url: imgs[0] ?? null,
+    images: imgs,
     image_credit: r.image_credit ? { name: r.image_credit, url: r.image_credit_url } : null,
     link: r.link_url ? { url: r.link_url, title: r.link_title, site: r.link_site } : null,
     sensitive: !!r.sensitive,
     created_at: r.created_at,
     like_count: r.like_count,
     comment_count: r.comment_count,
-    liked: likedSet ? likedSet.has(r.id) : false,
-    poll: polls?.get(r.id) ?? null,
+    repost_count: r.repost_count || 0,
+    liked: !!reaction,
+    reaction,
+    reactions: ctx?.summary.get(r.id) ?? [],
+    bookmarked: ctx?.bookmarks.has(r.id) ?? false,
+    poll: ctx?.polls.get(r.id) ?? null,
+    community: r.community_id ? ctx?.communities.get(r.community_id) ?? null : null,
+    is_daily: !!r.is_daily,
     author: { id: r.author_id, name: r.author_name, handle: r.author_handle, avatar_url: imgUrl(r.author_avatar), is_content: !!r.author_is_content },
   };
 }
-const pubUser = (x: any) => ({ id: x.id, name: x.name, handle: x.handle, avatar_url: imgUrl(x.avatar_key), is_content: !!x.is_content });
 
-async function likedSetFor(c: any, ids: string[]): Promise<Set<string>> {
+const inList = (ids: string[]) => ids.map(() => '?').join(',');
+
+/** 自己對每篇文的表情回應 */
+async function reactionsFor(c: any, ids: string[]): Promise<Map<string, string>> {
+  const u = c.get('user') as User | null;
+  if (!u || ids.length === 0) return new Map();
+  const r = await c.env.DB.prepare(`SELECT post_id, emoji FROM likes WHERE user_id = ? AND post_id IN (${inList(ids)})`).bind(u.id, ...ids).all();
+  return new Map(r.results.map((x: any) => [x.post_id, x.emoji]));
+}
+async function reactionSummary(c: any, ids: string[]) {
+  const out = new Map<string, { emoji: string; n: number }[]>();
+  if (!ids.length) return out;
+  const r = await c.env.DB.prepare(`SELECT post_id, emoji, COUNT(*) AS n FROM likes WHERE post_id IN (${inList(ids)}) GROUP BY post_id, emoji`).bind(...ids).all();
+  for (const x of r.results as any[]) {
+    if (!out.has(x.post_id)) out.set(x.post_id, []);
+    out.get(x.post_id)!.push({ emoji: x.emoji, n: x.n });
+  }
+  for (const v of out.values()) v.sort((a, b) => b.n - a.n);
+  return out;
+}
+async function bookmarksFor(c: any, ids: string[]): Promise<Set<string>> {
   const u = c.get('user') as User | null;
   if (!u || ids.length === 0) return new Set();
-  const qs = ids.map(() => '?').join(',');
-  const r = await c.env.DB.prepare(`SELECT post_id FROM likes WHERE user_id = ? AND post_id IN (${qs})`).bind(u.id, ...ids).all();
+  const r = await c.env.DB.prepare(`SELECT post_id FROM bookmarks WHERE user_id = ? AND post_id IN (${inList(ids)})`).bind(u.id, ...ids).all();
   return new Set(r.results.map((x: any) => x.post_id));
+}
+async function communitiesFor(c: any, ids: string[]) {
+  const out = new Map<string, any>();
+  const uniq = [...new Set(ids.filter(Boolean))];
+  if (!uniq.length) return out;
+  const r = await c.env.DB.prepare(`SELECT id, slug, name, icon FROM communities WHERE id IN (${inList(uniq)})`).bind(...uniq).all();
+  for (const x of r.results as any[]) out.set(x.id, { slug: x.slug, name: x.name, icon: x.icon });
+  return out;
 }
 
 /** 一次載入多篇文章的投票（選項、票數、自己投了哪個） */
-async function pollsFor(c: any, ids: string[]): Promise<Map<string, any>> {
+export async function pollsFor(c: any, ids: string[]): Promise<Map<string, any>> {
   const out = new Map<string, any>();
   if (!ids.length) return out;
-  const qs = ids.map(() => '?').join(',');
-  const polls = await c.env.DB.prepare(`SELECT post_id, ends_at FROM polls WHERE post_id IN (${qs})`).bind(...ids).all();
+  const polls = await c.env.DB.prepare(`SELECT post_id, ends_at FROM polls WHERE post_id IN (${inList(ids)})`).bind(...ids).all();
   if (!polls.results.length) return out;
   const pids = polls.results.map((p: any) => p.post_id);
-  const pq = pids.map(() => '?').join(',');
+  const pq = inList(pids);
   const opts = await c.env.DB.prepare(`SELECT post_id, idx, text, votes FROM poll_options WHERE post_id IN (${pq}) ORDER BY idx`).bind(...pids).all();
   const u = c.get('user') as User | null;
   const mine = u ? await c.env.DB.prepare(`SELECT post_id, idx FROM poll_votes WHERE user_id = ? AND post_id IN (${pq})`).bind(u.id, ...pids).all() : { results: [] };
@@ -101,11 +147,43 @@ async function pollsFor(c: any, ids: string[]): Promise<Map<string, any>> {
   }
   return out;
 }
-/** 文章列表輸出：按讚狀態＋投票一起載入 */
-async function serializeMany(c: any, rows: any[]) {
-  const ids = rows.map((r) => r.id as string);
-  const [liked, polls] = await Promise.all([likedSetFor(c, ids), pollsFor(c, ids)]);
-  return rows.map((r) => serializePost(r, liked, polls));
+
+/**
+ * 文章列表輸出：表情回應、收藏、投票、社團、轉發／引用的原文一起載入。
+ * 轉發會輸出成「原文＋repost（誰轉發）」；原文被刪或隱藏的轉發會略過。
+ */
+export async function serializeMany(c: any, rows: any[]) {
+  const origIds = [...new Set(rows.flatMap((r) => [r.repost_of, r.quote_of]).filter(Boolean))] as string[];
+  const originals = new Map<string, any>();
+  if (origIds.length) {
+    const r = await c.env.DB.prepare(`SELECT ${POST_COLS} FROM posts p JOIN users u ON u.id = p.user_id WHERE p.id IN (${inList(origIds)}) AND p.hidden = 0 AND u.status != 'banned'`).bind(...origIds).all();
+    for (const x of r.results as any[]) originals.set(x.id, x);
+  }
+  const all = [...rows.filter((r) => r.kind !== 'repost'), ...originals.values()];
+  const ids = [...new Set(all.map((r) => r.id as string))];
+  const [reactions, summary, bookmarks, polls, communities] = await Promise.all([
+    reactionsFor(c, ids), reactionSummary(c, ids), bookmarksFor(c, ids), pollsFor(c, ids), communitiesFor(c, all.map((r) => r.community_id)),
+  ]);
+  const ctx: Ctx = { reactions, summary, bookmarks, polls, communities };
+  const out: any[] = [];
+  for (const r of rows) {
+    if (r.kind === 'repost') {
+      const o = originals.get(r.repost_of);
+      if (!o) continue;
+      const s: any = serializePost(o, ctx);
+      if (o.quote_of) s.quote = { deleted: true };
+      s.repost = { id: r.id, created_at: r.created_at, by: { id: r.author_id, name: r.author_name, handle: r.author_handle } };
+      out.push(s);
+      continue;
+    }
+    const s: any = serializePost(r, ctx);
+    if (r.quote_of) {
+      const o = originals.get(r.quote_of);
+      s.quote = o ? serializePost(o, ctx) : { deleted: true };
+    }
+    out.push(s);
+  }
+  return out;
 }
 
 /** 共用的可見性條件：隱藏、停權、敏感內容、內容帳號舊文、封鎖與靜音 */
@@ -121,6 +199,13 @@ export async function visibility(c: any, opts: { forHot?: boolean; ignoreBlocks?
     parts.push("p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ?)");
     parts.push("p.user_id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = ? AND kind = 'block')");
     binds.push(u.id, u.id);
+    // 自己設定的過濾字詞（自己的文不過濾）
+    const muted = await c.env.DB.prepare('SELECT word FROM muted_words WHERE user_id = ? LIMIT 50').bind(u.id).all();
+    for (const m of muted.results as any[]) {
+      parts.push("(p.user_id = ? OR (instr(lower(p.text), ?) = 0 AND instr(lower(IFNULL(p.title, '')), ?) = 0))");
+      const w = String(m.word).toLowerCase();
+      binds.push(u.id, w, w);
+    }
   }
   return [parts.join(' AND '), binds];
 }
@@ -139,7 +224,7 @@ api.get('/me', async (c) => {
     user: {
       id: u.id, name: u.name, handle: u.handle, bio: u.bio, email: u.email, avatar_url: imgUrl(u.avatar_key), banner_url: imgUrl(u.banner_key),
       accent: u.accent, pinned_post_id: u.pinned_post_id, role: u.role, theme: u.theme, age_verified: !!u.age_verified, show_sensitive: !!u.show_sensitive,
-      onboarded: !!u.onboarded, needs_human_check: needsHumanCheck(c.env, u),
+      onboarded: !!u.onboarded, needs_human_check: needsHumanCheck(c.env, u), status: u.status,
     },
     unread: unread?.n ?? 0,
     unread_messages: unreadMsg?.n ?? 0,
@@ -233,7 +318,7 @@ api.get('/feed', async (c) => {
     const [vis, vb] = await visibility(c, { forHot: true });
     const r = await c.env.DB.prepare(
       `SELECT ${POST_COLS}, p.real_like_count FROM posts p JOIN users u ON u.id = p.user_id
-       WHERE ${vis} AND p.created_at > ? ORDER BY p.created_at DESC LIMIT 600`
+       WHERE ${vis} AND p.kind != 'repost' AND p.created_at > ? ORDER BY p.created_at DESC LIMIT 600`
     ).bind(...vb, now() - 2 * 86400_000).all();
     const t = now();
     const ranked = r.results
@@ -308,16 +393,40 @@ api.post('/posts', async (c) => {
     if (!text) throw new HttpError(400, '請寫下投票的題目');
     poll = { options, days: [1, 3, 7].includes(Number(b.poll.days)) ? Number(b.poll.days) : 1 };
   }
-  if (!text && !b.image_key) throw new HttpError(400, '內容不能空白');
+  const keys: string[] = (Array.isArray(b.image_keys) ? b.image_keys : b.image_key ? [b.image_key] : []).map(String).slice(0, 4);
+  if (Array.isArray(b.image_keys) && b.image_keys.length > 4) throw new HttpError(400, '一篇最多 4 張圖片');
+  // 引用轉發
+  let quoteOf: string | null = null;
+  let quoteAuthor: string | null = null;
+  if (b.quote_of) {
+    let q = await c.env.DB.prepare("SELECT p.id, p.user_id, p.kind, p.repost_of FROM posts p JOIN users u ON u.id = p.user_id WHERE p.id = ? AND p.hidden = 0 AND u.status != 'banned'").bind(String(b.quote_of)).first<any>();
+    if (q?.kind === 'repost') q = await c.env.DB.prepare('SELECT id, user_id FROM posts WHERE id = ? AND hidden = 0').bind(q.repost_of).first<any>();
+    if (!q) throw new HttpError(404, '原文已不存在');
+    if (await isBlockedEither(c.env.DB, u.id, q.user_id)) throw new HttpError(403, '你無法引用這位用戶的文章');
+    if (!text) throw new HttpError(400, '引用轉發要寫點什麼；不想寫的話用「轉發」就好');
+    quoteOf = q.id; quoteAuthor = q.user_id;
+  }
+  // 發到社團：必須是成員
+  let communityId: string | null = null;
+  if (b.community_id) {
+    const m = await c.env.DB.prepare('SELECT 1 FROM community_members WHERE community_id = ? AND user_id = ?').bind(String(b.community_id), u.id).first();
+    if (!m) throw new HttpError(403, '要先加入社團才能發文');
+    communityId = String(b.community_id);
+  }
+  if (!text && !keys.length) throw new HttpError(400, '內容不能空白');
   const max = kind === 'blog' ? BLOG_MAX : POST_MAX;
   if (text.length > max) throw new HttpError(400, `內容最多 ${max} 字`);
   const recent = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM posts WHERE user_id = ? AND created_at > ?').bind(u.id, now() - 3600_000).first<{ n: number }>();
   if ((recent?.n ?? 0) >= 30) throw new HttpError(429, '發文太頻繁，請稍後再試');
-  let imageKey: string | null = null;
-  if (b.image_key) { await ownUpload(c.env.DB, b.image_key, u.id); imageKey = b.image_key; }
+  for (const k of keys) await ownUpload(c.env.DB, k, u.id);
   const id = newId();
-  await c.env.DB.prepare('INSERT INTO posts (id, user_id, text, title, kind, image_key, sensitive, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, u.id, text, title, kind, imageKey, b.sensitive ? 1 : 0, 'user', now()).run();
+  await c.env.DB.prepare('INSERT INTO posts (id, user_id, text, title, kind, image_key, images, quote_of, community_id, sensitive, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, u.id, text, title, kind, keys[0] ?? null, keys.length > 1 ? JSON.stringify(keys) : null, quoteOf, communityId, b.sensitive ? 1 : 0, 'user', now()).run();
+  if (quoteOf) {
+    await c.env.DB.prepare('UPDATE posts SET repost_count = repost_count + 1 WHERE id = ?').bind(quoteOf).run();
+    await notify(c.env, c.executionCtx, quoteAuthor!, u, 'quote', id, text);
+  }
+  if (communityId) await c.env.DB.prepare('UPDATE communities SET post_count = post_count + 1 WHERE id = ?').bind(communityId).run();
   if (poll) {
     await c.env.DB.batch([
       c.env.DB.prepare('INSERT INTO polls (post_id, ends_at) VALUES (?, ?)').bind(id, now() + poll.days * 86400_000),
@@ -369,12 +478,26 @@ api.delete('/posts/:id', async (c) => {
   const p = await c.env.DB.prepare('SELECT user_id, image_key FROM posts WHERE id = ?').bind(c.req.param('id')).first<any>();
   if (!p) throw new HttpError(404, '找不到這篇文章');
   if (p.user_id !== u.id && u.role !== 'gm') throw new HttpError(403, '沒有權限');
+  if (p.user_id !== u.id) {
+    // GM 刪別人的文：記錄原因並通知本人
+    const b = await c.req.json<any>().catch(() => ({}));
+    const full = await c.env.DB.prepare('SELECT text FROM posts WHERE id = ?').bind(c.req.param('id')).first<any>();
+    await logAudit(c.env.DB, u.id, 'post_delete', c.req.param('id'), MOD_REASONS[cleanReason(b.reason)]);
+    await recordAction(c.env, c.executionCtx, { userId: p.user_id, targetType: 'post', targetId: c.req.param('id'), action: 'delete', reason: b.reason, detail: b.detail, snapshot: full?.text, gmId: u.id });
+  }
   await deletePost(c.env, c.req.param('id'), p.image_key);
   return c.json({ ok: true });
 });
 
 export async function deletePost(env: any, id: string, imageKey: string | null) {
+  const p = await env.DB.prepare('SELECT images, image_key, repost_of, quote_of, community_id FROM posts WHERE id = ?').bind(id).first();
+  const keys = p ? imageKeys(p) : imageKey ? [imageKey] : [];
+  const orig = p?.repost_of || p?.quote_of;
   await env.DB.batch([
+    ...(orig ? [env.DB.prepare('UPDATE posts SET repost_count = MAX(repost_count - 1, 0) WHERE id = ?').bind(orig)] : []),
+    ...(p?.community_id ? [env.DB.prepare('UPDATE communities SET post_count = MAX(post_count - 1, 0) WHERE id = ?').bind(p.community_id)] : []),
+    env.DB.prepare("DELETE FROM posts WHERE repost_of = ? AND kind = 'repost'").bind(id),
+    env.DB.prepare('DELETE FROM bookmarks WHERE post_id = ?').bind(id),
     env.DB.prepare('DELETE FROM posts WHERE id = ?').bind(id),
     env.DB.prepare('DELETE FROM comments WHERE post_id = ?').bind(id),
     env.DB.prepare('DELETE FROM likes WHERE post_id = ?').bind(id),
@@ -384,16 +507,21 @@ export async function deletePost(env: any, id: string, imageKey: string | null) 
     env.DB.prepare('DELETE FROM notifications WHERE post_id = ?').bind(id),
     env.DB.prepare('UPDATE users SET pinned_post_id = NULL WHERE pinned_post_id = ?').bind(id),
   ]);
-  if (imageKey) {
-    await env.IMAGES.delete(imageKey);
-    await env.DB.prepare('DELETE FROM uploads WHERE key = ?').bind(imageKey).run();
+  for (const k of keys) {
+    await env.IMAGES.delete(k);
+    await env.DB.prepare('DELETE FROM uploads WHERE key = ?').bind(k).run();
   }
 }
 
 // ---------- 讚 ----------
-export async function addLike(env: any, postId: string, liker: { id: string; name?: string; is_content: number }, ctx?: { waitUntil(p: Promise<unknown>): void }) {
-  const r = await env.DB.prepare('INSERT OR IGNORE INTO likes (post_id, user_id, created_at) VALUES (?, ?, ?)').bind(postId, liker.id, now()).run();
-  if (!r.meta.changes) return false;
+export async function addLike(env: any, postId: string, liker: { id: string; name?: string; is_content: number }, ctx?: { waitUntil(p: Promise<unknown>): void }, emoji = '❤️') {
+  if (!REACTIONS.includes(emoji)) emoji = '❤️';
+  const r = await env.DB.prepare('INSERT OR IGNORE INTO likes (post_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?)').bind(postId, liker.id, emoji, now()).run();
+  if (!r.meta.changes) {
+    // 已經回應過：換成新的表情，不重複計數
+    await env.DB.prepare('UPDATE likes SET emoji = ? WHERE post_id = ? AND user_id = ?').bind(emoji, postId, liker.id).run();
+    return false;
+  }
   await env.DB.prepare(`UPDATE posts SET like_count = like_count + 1${liker.is_content ? '' : ', real_like_count = real_like_count + 1'} WHERE id = ?`).bind(postId).run();
   if (!liker.is_content) {
     const p = await env.DB.prepare('SELECT user_id, text FROM posts WHERE id = ?').bind(postId).first();
@@ -413,7 +541,8 @@ api.post('/posts/:id/like', async (c) => {
   const u = requireUser(c);
   const id = c.req.param('id');
   await assertNotBlockedByAuthor(c, u, id);
-  await addLike(c.env, id, u, c.executionCtx);
+  const b = await c.req.json<any>().catch(() => ({}));
+  await addLike(c.env, id, u, c.executionCtx, b.emoji);
   return c.json({ ok: true });
 });
 
@@ -427,10 +556,10 @@ api.delete('/posts/:id/like', async (c) => {
 
 api.get('/posts/:id/likes', async (c) => {
   const r = await c.env.DB.prepare(
-    `SELECT u.id, u.name, u.handle, u.avatar_key, u.is_content FROM likes l JOIN users u ON u.id = l.user_id
+    `SELECT u.id, u.name, u.handle, u.avatar_key, u.is_content, l.emoji FROM likes l JOIN users u ON u.id = l.user_id
      WHERE l.post_id = ? AND u.status != 'banned' ORDER BY l.created_at DESC LIMIT 200`
   ).bind(c.req.param('id')).all();
-  return c.json({ users: r.results.map(pubUser) });
+  return c.json({ users: r.results.map((x: any) => ({ ...pubUser(x), emoji: x.emoji })) });
 });
 
 // ---------- 留言（支援一層回覆） ----------
@@ -475,6 +604,12 @@ api.delete('/comments/:id', async (c) => {
   const cm = await c.env.DB.prepare('SELECT user_id, post_id FROM comments WHERE id = ?').bind(c.req.param('id')).first<any>();
   if (!cm) throw new HttpError(404, '找不到這則留言');
   if (cm.user_id !== u.id && u.role !== 'gm') throw new HttpError(403, '沒有權限');
+  if (cm.user_id !== u.id) {
+    const b = await c.req.json<any>().catch(() => ({}));
+    const full = await c.env.DB.prepare('SELECT text FROM comments WHERE id = ?').bind(c.req.param('id')).first<any>();
+    await logAudit(c.env.DB, u.id, 'comment_delete', c.req.param('id'), MOD_REASONS[cleanReason(b.reason)]);
+    await recordAction(c.env, c.executionCtx, { userId: cm.user_id, targetType: 'comment', targetId: c.req.param('id'), action: 'delete', reason: b.reason, detail: b.detail, snapshot: full?.text, gmId: u.id });
+  }
   const n = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM comments WHERE id = ? OR parent_id = ?').bind(c.req.param('id'), c.req.param('id')).first<{ n: number }>();
   await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM comments WHERE id = ? OR parent_id = ?').bind(c.req.param('id'), c.req.param('id')),
@@ -513,7 +648,9 @@ api.get('/users/:handle', async (c) => {
     }
   }
   const today = stats && stats.today_day === twDay() ? stats.today : 0;
+  const badges = await badgesFor(c.env, p);
   return c.json({
+    badges,
     user: {
       id: p.id, name: p.name, handle: p.handle, bio: p.bio, avatar_url: imgUrl(p.avatar_key), banner_url: imgUrl(p.banner_key), accent: p.accent,
       is_content: !!p.is_content, created_at: p.created_at,
@@ -550,21 +687,23 @@ api.delete('/users/:handle/follow', async (c) => {
 
 // ---------- 通知 ----------
 api.get('/notifications', async (c) => {
-  const u = requireUser(c);
+  const u = c.get('user') as User | null;
+  if (!u) throw new HttpError(401, '請先登入');
   const r = await c.env.DB.prepare(
-    `SELECT n.id, n.type, n.post_id, n.read, n.created_at, a.name, a.handle, a.avatar_key, a.is_content
+    `SELECT n.id, n.type, n.post_id, n.ref_id, n.read, n.created_at, a.name, a.handle, a.avatar_key, a.is_content
      FROM notifications n JOIN users a ON a.id = n.actor_id WHERE n.user_id = ? ORDER BY n.created_at DESC LIMIT 50`
   ).bind(u.id).all();
   return c.json({
     notifications: r.results.map((x: any) => ({
-      id: x.id, type: x.type, post_id: x.post_id, read: !!x.read, created_at: x.created_at,
+      id: x.id, type: x.type, post_id: x.post_id, ref_id: x.ref_id, read: !!x.read, created_at: x.created_at,
       actor: { name: x.name, handle: x.handle, avatar_url: imgUrl(x.avatar_key), is_content: !!x.is_content },
     })),
   });
 });
 
 api.post('/notifications/read', async (c) => {
-  const u = requireUser(c);
+  const u = c.get('user') as User | null;
+  if (!u) throw new HttpError(401, '請先登入');
   await c.env.DB.prepare('UPDATE notifications SET read = 1 WHERE user_id = ?').bind(u.id).run();
   return c.json({ ok: true });
 });

@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import type { AppEnv, User } from './env';
 import { getSettings, logAudit, now, setSetting, twDay } from './env';
+import { cleanReason, MOD_REASONS, modAdmin, recordAction } from './moderation';
+import { runDailyPoll } from './features';
 import { HttpError, deletePost } from './api';
 import { deleteUserData } from './social';
 import { runPostTick, fetchNews, dailyPosts } from './content';
@@ -9,7 +11,7 @@ export const admin = new Hono<AppEnv>();
 
 admin.use('*', async (c, next) => {
   const u = c.get('user') as User | null;
-  if (!u || u.role !== 'gm') throw new HttpError(403, '只有 GM 可以使用後台');
+  if (!u || u.role !== 'gm' || u.status !== 'active') throw new HttpError(403, '只有 GM 可以使用後台');
   await next();
 });
 
@@ -63,8 +65,10 @@ admin.post('/users/:id/status', async (c) => {
   const me = c.get('user')!;
   if (c.req.param('id') === me.id) throw new HttpError(400, '不能變更自己的狀態');
   await c.env.DB.prepare('UPDATE users SET status = ? WHERE id = ? AND is_content = 0').bind(b.status, c.req.param('id')).run();
-  if (b.status === 'banned') await c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(c.req.param('id')).run();
-  await logAudit(c.env.DB, me.id, `user_status:${b.status}`, c.req.param('id'));
+  await logAudit(c.env.DB, me.id, `user_status:${b.status}`, c.req.param('id'), b.status === 'active' ? '' : MOD_REASONS[cleanReason(b.reason)]);
+  if (b.status !== 'active') {
+    await recordAction(c.env, c.executionCtx, { userId: c.req.param('id'), targetType: 'account', targetId: c.req.param('id'), action: b.status, reason: b.reason, detail: b.detail, gmId: me.id });
+  }
   return c.json({ ok: true });
 });
 
@@ -104,7 +108,12 @@ admin.get('/posts', async (c) => {
 admin.post('/posts/:id', async (c) => {
   const b = await c.req.json<any>();
   const id = c.req.param('id');
-  await logAudit(c.env.DB, c.get('user')!.id, `post_${b.action}`, id);
+  const me = c.get('user')!;
+  await logAudit(c.env.DB, me.id, `post_${b.action}`, id, b.action === 'unhide' ? '' : MOD_REASONS[cleanReason(b.reason)]);
+  const target = await c.env.DB.prepare('SELECT user_id, text FROM posts WHERE id = ?').bind(id).first<any>();
+  if (target && ['hide', 'delete', 'mark_sensitive'].includes(b.action)) {
+    await recordAction(c.env, c.executionCtx, { userId: target.user_id, targetType: 'post', targetId: id, action: b.action, reason: b.reason, detail: b.detail, snapshot: target.text, gmId: me.id });
+  }
   if (b.action === 'hide') await c.env.DB.prepare('UPDATE posts SET hidden = 1 WHERE id = ?').bind(id).run();
   else if (b.action === 'unhide') await c.env.DB.prepare('UPDATE posts SET hidden = 0 WHERE id = ?').bind(id).run();
   else if (b.action === 'mark_sensitive') await c.env.DB.prepare('UPDATE posts SET sensitive = 1 WHERE id = ?').bind(id).run();
@@ -133,6 +142,15 @@ admin.post('/reports/:id', async (c) => {
   const me = c.get('user')!;
   const r = await c.env.DB.prepare('SELECT * FROM reports WHERE id = ?').bind(c.req.param('id')).first<any>();
   if (!r) throw new HttpError(404, '找不到這筆檢舉');
+  if (b.action === 'hide' || b.action === 'mark_sensitive') {
+    const t = r.post_id
+      ? await c.env.DB.prepare('SELECT user_id, text FROM posts WHERE id = ?').bind(r.post_id).first<any>()
+      : await c.env.DB.prepare('SELECT user_id, text FROM comments WHERE id = ?').bind(r.comment_id).first<any>();
+    const reason = b.reason || ({ harassment: 'harassment', unmarked_sensitive: 'unmarked_sensitive', spam: 'spam', copyright: 'copyright', illegal: 'illegal' } as any)[r.reason] || 'other';
+    if (t && !(b.action === 'mark_sensitive' && !r.post_id)) {
+      await recordAction(c.env, c.executionCtx, { userId: t.user_id, targetType: r.post_id ? 'post' : 'comment', targetId: r.post_id || r.comment_id, action: b.action, reason, detail: b.detail, snapshot: t.text, gmId: me.id, source: 'report' });
+    }
+  }
   if (b.action === 'hide' && r.post_id) await c.env.DB.prepare('UPDATE posts SET hidden = 1 WHERE id = ?').bind(r.post_id).run();
   if (b.action === 'hide' && r.comment_id) await c.env.DB.prepare('UPDATE comments SET hidden = 1 WHERE id = ?').bind(r.comment_id).run();
   if (b.action === 'mark_sensitive' && r.post_id) await c.env.DB.prepare('UPDATE posts SET sensitive = 1 WHERE id = ?').bind(r.post_id).run();
@@ -186,13 +204,14 @@ admin.patch('/content/:id', async (c) => {
 });
 
 const EDITABLE = ['content_enabled', 'daily_posts', 'interact_like', 'interact_comment', 'old_posts_mode',
-  'group_news', 'group_game', 'group_mixed', 'group_fun', 'paused_until', 'newsdata_key', 'rss_feeds', 'feed_content_ratio', 'ai_model', 'photo_ratio', 'pexels_key'];
+  'group_news', 'group_game', 'group_mixed', 'group_fun', 'paused_until', 'newsdata_key', 'rss_feeds', 'feed_content_ratio', 'ai_model', 'photo_ratio', 'pexels_key', 'community_ratio', 'daily_poll'];
 export const AI_MODELS = ['', '@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct-fp8-fast', '@cf/meta/llama-4-scout-17b-16e-instruct'];
 admin.patch('/settings', async (c) => {
   const b = await c.req.json<Record<string, any>>();
   for (const [k, v] of Object.entries(b)) {
     if (!EDITABLE.includes(k)) continue;
     let val = String(v);
+    if (k === 'community_ratio' && !(Number(val) >= 0 && Number(val) <= 100)) continue;
     if (k === 'photo_ratio' && !(Number(val) >= 0 && Number(val) <= 100)) continue;
     if (k === 'daily_posts' && !(Number(val) >= 0 && Number(val) <= 14400)) continue;
     if (k === 'feed_content_ratio' && !(Number(val) >= 0 && Number(val) <= 100)) continue;
@@ -264,3 +283,9 @@ admin.get('/audit', async (c) => {
   ).all();
   return c.json({ items: r.results });
 });
+admin.post('/content/daily-poll', async (c) => {
+  await logAudit(c.env.DB, c.get('user')!.id, 'daily_poll_now', null);
+  return c.json(await runDailyPoll(c.env, true));
+});
+
+admin.route('/', modAdmin);

@@ -6,6 +6,8 @@ import { auth, loadUser } from './auth';
 import { api, HttpError } from './api';
 import { social } from './social';
 import { admin } from './admin';
+import { mod } from './moderation';
+import { features } from './features';
 import { handleCron } from './content';
 import { withOg } from './og';
 
@@ -56,6 +58,8 @@ app.onError((err, c) => {
 
 app.route('/auth', auth);
 app.route('/api/admin', admin);
+app.route('/api', mod);
+app.route('/api', features);
 app.route('/api', social);
 app.route('/api', api);
 

@@ -9,6 +9,8 @@ const TEXT: Record<string, string> = {
   mention: '在文章中提到你',
   follow: '開始追蹤你',
   message: '傳了一則私訊給你',
+  repost: '轉發了你的文章',
+  quote: '引用了你的文章',
 };
 
 /**

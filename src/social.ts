@@ -327,6 +327,14 @@ export async function deleteUserData(env: any, uid: string) {
     db.prepare('DELETE FROM comments WHERE user_id = ?').bind(uid),
     db.prepare('DELETE FROM likes WHERE user_id = ?').bind(uid),
     db.prepare('DELETE FROM poll_votes WHERE user_id = ?').bind(uid),
+    db.prepare('DELETE FROM bookmarks WHERE user_id = ?').bind(uid),
+    db.prepare('DELETE FROM muted_words WHERE user_id = ?').bind(uid),
+    db.prepare('DELETE FROM story_views WHERE user_id = ?').bind(uid),
+    db.prepare('DELETE FROM story_views WHERE story_id IN (SELECT id FROM stories WHERE user_id = ?)').bind(uid),
+    db.prepare('DELETE FROM stories WHERE user_id = ?').bind(uid),
+    db.prepare('UPDATE communities SET member_count = MAX(member_count - 1, 0) WHERE id IN (SELECT community_id FROM community_members WHERE user_id = ?)').bind(uid),
+    db.prepare('DELETE FROM community_members WHERE user_id = ?').bind(uid),
+    db.prepare('UPDATE communities SET owner_id = NULL WHERE owner_id = ?').bind(uid),
     db.prepare('DELETE FROM follows WHERE follower_id = ? OR followee_id = ?').bind(uid, uid),
     db.prepare('DELETE FROM notifications WHERE user_id = ? OR actor_id = ?').bind(uid, uid),
     db.prepare('DELETE FROM blocks WHERE blocker_id = ? OR blocked_id = ?').bind(uid, uid),
@@ -338,7 +346,8 @@ export async function deleteUserData(env: any, uid: string) {
     db.prepare('DELETE FROM daily_active WHERE user_id = ?').bind(uid),
   ];
   for (const id of ownPosts) {
-    stmts.push(db.prepare('DELETE FROM comments WHERE post_id = ?').bind(id), db.prepare('DELETE FROM likes WHERE post_id = ?').bind(id), db.prepare('DELETE FROM notifications WHERE post_id = ?').bind(id));
+    stmts.push(db.prepare('DELETE FROM comments WHERE post_id = ?').bind(id), db.prepare('DELETE FROM likes WHERE post_id = ?').bind(id), db.prepare('DELETE FROM notifications WHERE post_id = ?').bind(id),
+      db.prepare("DELETE FROM posts WHERE repost_of = ? AND kind = 'repost'").bind(id), db.prepare('DELETE FROM bookmarks WHERE post_id = ?').bind(id));
   }
   stmts.push(db.prepare('DELETE FROM posts WHERE user_id = ?').bind(uid));
   for (const id of convs) stmts.push(db.prepare('DELETE FROM messages WHERE conversation_id = ?').bind(id), db.prepare('DELETE FROM conversations WHERE id = ?').bind(id));

@@ -56,6 +56,12 @@ CREATE TABLE IF NOT EXISTS posts (
   like_count INTEGER NOT NULL DEFAULT 0,      -- 公開讚數（含 ✦ 帳號）
   real_like_count INTEGER NOT NULL DEFAULT 0, -- 真人讚數（熱門排行用）
   comment_count INTEGER NOT NULL DEFAULT 0,
+  images TEXT,                                -- 多張圖片的 key（JSON 陣列，最多 4 張；第一張同 image_key）
+  repost_of TEXT,                             -- 轉發的原文 id（kind = repost）
+  quote_of TEXT,                              -- 引用轉發的原文 id
+  repost_count INTEGER NOT NULL DEFAULT 0,    -- 被轉發＋引用的次數
+  community_id TEXT,                          -- 發在哪個社團
+  is_daily INTEGER NOT NULL DEFAULT 0,        -- 1 = 每日熱門投票
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
@@ -75,6 +81,7 @@ CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id, created_at);
 CREATE TABLE IF NOT EXISTS likes (
   post_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
+  emoji TEXT NOT NULL DEFAULT '❤️',           -- 表情回應：❤️ 😂 😮 😢 😡
   created_at INTEGER NOT NULL,
   PRIMARY KEY (post_id, user_id)
 );
@@ -91,8 +98,9 @@ CREATE TABLE IF NOT EXISTS notifications (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   actor_id TEXT NOT NULL,
-  type TEXT NOT NULL,                         -- like | comment | reply | mention | follow | message
+  type TEXT NOT NULL,                         -- like | comment | reply | mention | follow | message | repost | quote | moderation | appeal
   post_id TEXT,
+  ref_id TEXT,                                -- moderation／appeal：對應的處理紀錄 id
   read INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
@@ -246,6 +254,96 @@ CREATE TABLE IF NOT EXISTS poll_votes (
 );
 CREATE INDEX IF NOT EXISTS idx_poll_votes_user ON poll_votes(user_id);
 
+-- 管理處理紀錄（通知本人、申訴、透明度報告都用這張表）
+CREATE TABLE IF NOT EXISTS moderation_actions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,                      -- 被處理的用戶
+  target_type TEXT NOT NULL,                  -- post | comment | account
+  target_id TEXT NOT NULL,
+  action TEXT NOT NULL,                       -- hide | delete | mark_sensitive | suspended | banned
+  reason TEXT NOT NULL,                       -- spam | scam | harass | privacy | illegal | minor | violence | unlabeled | other
+  detail TEXT DEFAULT '',                     -- GM 補充說明（會讓本人看到）
+  snapshot TEXT DEFAULT '',                   -- 被處理內容的前 200 字（刪除後本人還看得到是哪篇）
+  gm_id TEXT,
+  source TEXT NOT NULL DEFAULT 'gm',          -- gm | report
+  appeal_status TEXT NOT NULL DEFAULT 'none', -- none | pending | accepted | rejected
+  appeal_text TEXT,
+  appeal_reply TEXT,
+  appealed_at INTEGER,
+  decided_at INTEGER,
+  reversed INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mod_user ON moderation_actions(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mod_appeal ON moderation_actions(appeal_status, appealed_at);
+
+-- 個人過濾：自己不想看的關鍵字或標籤
+CREATE TABLE IF NOT EXISTS muted_words (
+  user_id TEXT NOT NULL,
+  word TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, word)
+);
+
+-- 收藏
+CREATE TABLE IF NOT EXISTS bookmarks (
+  user_id TEXT NOT NULL,
+  post_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, post_id)
+);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON bookmarks(user_id, created_at DESC);
+
+-- 限時動態（24 小時後消失）
+CREATE TABLE IF NOT EXISTS stories (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  text TEXT DEFAULT '',
+  image_key TEXT,
+  bg TEXT DEFAULT '',                         -- 純文字動態的背景色
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_stories_user ON stories(user_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_stories_exp ON stories(expires_at);
+CREATE TABLE IF NOT EXISTS story_views (
+  story_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (story_id, user_id)
+);
+
+-- 社團／看板
+CREATE TABLE IF NOT EXISTS communities (
+  id TEXT PRIMARY KEY,
+  slug TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  icon TEXT DEFAULT '',                       -- 一個表情符號當社團圖示
+  owner_id TEXT,                              -- NULL = 官方社團
+  official INTEGER NOT NULL DEFAULT 0,
+  content_group TEXT,                         -- ✦ 帳號哪一組會把部分文章發到這個社團
+  member_count INTEGER NOT NULL DEFAULT 0,
+  post_count INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS community_members (
+  community_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member',        -- owner | member
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (community_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_cm_user ON community_members(user_id);
+
+INSERT OR IGNORE INTO communities (id, slug, name, description, icon, official, content_group, created_at) VALUES
+  ('cm_news', 'news', '時事討論', '新聞、時事、社會大小事，理性討論', '📰', 1, 'news', 1793491200000),
+  ('cm_game', 'games', '遊戲閒聊', '手遊、主機、PC、桌遊，什麼遊戲都能聊', '🎮', 1, 'game', 1793491200000),
+  ('cm_life', 'life', '生活雜談', '美食、旅行、追劇、心情，日常什麼都聊', '☕', 1, 'mixed', 1793491200000),
+  ('cm_fun', 'funny', '趣事分享', '今天遇到什麼好笑的事？分享出來讓大家笑一下', '😂', 1, 'fun', 1793491200000),
+  ('cm_pets', 'pets', '毛孩俱樂部', '貓狗兔鼠，毛孩照片與日常', '🐾', 1, NULL, 1793491200000),
+  ('cm_free', 'free-talk', '暢所欲言', '想說什麼就說什麼，只要不違法', '💬', 1, NULL, 1793491200000);
+
 -- 每日統計（儀表板圖表用）
 CREATE TABLE IF NOT EXISTS daily_active (
   day TEXT NOT NULL,
@@ -256,7 +354,9 @@ CREATE TABLE IF NOT EXISTS daily_active (
 INSERT OR IGNORE INTO settings (key, value) VALUES
   ('content_enabled', '1'),
   ('daily_posts', '200'),                    -- 全站 ✦ 帳號每天約發幾則（輪流）
-  ('photo_ratio', '30'),                     -- 非時事的 ✦ 貼文有幾 % 附真實照片（Pexels）
+  ('photo_ratio', '30'),
+  ('community_ratio', '30'),                 -- ✦ 貼文有幾 % 發到對應的官方社團
+  ('daily_poll', '1'),                       -- 每天一題 ✦ 全站投票                     -- 非時事的 ✦ 貼文有幾 % 附真實照片（Pexels）
   ('pexels_key', ''),
   ('group_fun', '1'),
   ('feed_content_ratio', '50'),              -- 熱門動態牆中 ✦ 內容最多佔幾 %
