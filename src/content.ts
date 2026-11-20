@@ -3,6 +3,7 @@ import { getSettings, logContent, newId, now } from './env';
 import { BASE_RULES, generate } from './ai';
 import { fetchNews as fetchNewsImpl, takeNews, type NewsItem } from './news';
 import { addComment, addLike } from './api';
+import { findPhoto, splitPhotoLine, topicQuery } from './photos';
 
 export const fetchNews = fetchNewsImpl;
 export const GROUPS = ['news', 'game', 'mixed', 'fun'] as const;
@@ -26,7 +27,7 @@ const pick = <T>(a: T[]) => a[Math.floor(Math.random() * a.length)];
 /** 依機率取整數：rate = 2.3 → 2 或 3（平均 2.3） */
 const randRound = (rate: number) => Math.floor(rate) + (Math.random() < rate % 1 ? 1 : 0);
 
-async function writePost(env: Env, model: string, a: Account, news: NewsItem | null): Promise<string | null> {
+async function writePost(env: Env, model: string, a: Account, news: NewsItem | null, wantPhoto = false): Promise<string | null> {
   const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。`;
   if (news) {
     const prompt = `請根據下面這則新聞的標題與摘要寫一則重點整理貼文。
@@ -44,7 +45,8 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
     : `現在是${twNow()}。依照你的主題與個性，寫一則社群貼文。
 2 到 4 句話，60 到 150 字，可以在結尾問大家一個輕鬆的問題，或加上最多一個 #話題標籤。
 每次換不同的小話題，不要每篇都一樣。`;
-  const out = await generate(env, system, prompt, 320, model);
+  const photoAsk = wantPhoto ? '\n這篇會配一張照片：寫完貼文後，另起最後一行寫「PHOTO: 」加上 2 到 4 個英文單字，描述適合搭配的照片場景或物品（不要人物特寫）。' : '';
+  const out = await generate(env, system, prompt + photoAsk, 320, model);
   if (out) return out;
   if (env.DEV_MODE !== '1') return null; // 正式環境 AI 失敗就不發，避免重複的罐頭文
   return pick([
@@ -54,7 +56,7 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
   ]);
 }
 
-async function postOne(env: Env, model: string, a: Account): Promise<string | null> {
+async function postOne(env: Env, model: string, a: Account, photoRatio: number): Promise<string | null> {
   // 不論成功與否都排到隊伍最後面，下一則換別人（輪流）
   const toBack = env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(now(), a.id);
   let news: NewsItem | null = null;
@@ -62,17 +64,22 @@ async function postOne(env: Env, model: string, a: Account): Promise<string | nu
     news = await takeNews(env);
     if (!news) { await toBack.run(); return null; }
   }
-  const text = await writePost(env, model, a, news);
-  if (!text) {
+  const wantPhoto = !news && Math.random() * 100 < photoRatio;
+  const raw = await writePost(env, model, a, news, wantPhoto);
+  if (!raw) {
     await toBack.run();
     await logContent(env.DB, 'error', a.id, `${a.name}：AI 生成失敗，這次跳過`);
     return null;
   }
+  const { text, query } = splitPhotoLine(raw);
+  if (!text) { await toBack.run(); return null; }
+  // 照片找不到就只發文字，不影響發文
+  const photo = wantPhoto ? await findPhoto(env, query || topicQuery(a.persona)).catch(() => null) : null;
   const id = newId();
   const t = now();
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO posts (id, user_id, text, link_url, link_title, link_site, source, created_at) VALUES (?, ?, ?, ?, ?, ?, 'content', ?)`)
-      .bind(id, a.id, text.slice(0, 1000), news?.url ?? null, news?.title ?? null, news ? siteOf(news.url, news.source) : null, t),
+    env.DB.prepare(`INSERT INTO posts (id, user_id, text, image_key, image_credit, image_credit_url, link_url, link_title, link_site, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'content', ?)`)
+      .bind(id, a.id, text.slice(0, 1000), photo?.key ?? null, photo?.credit ?? null, photo?.creditUrl ?? null, news?.url ?? null, news?.title ?? null, news ? siteOf(news.url, news.source) : null, t),
     env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(t, a.id),
   ]);
   return id;
@@ -108,7 +115,7 @@ export async function runPostTick(env: Env, opts: { force?: boolean } = {}) {
     const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM news_cache WHERE used = 0 AND fetched_at > ?').bind(now() - 36 * 3600_000).first<{ n: number }>();
     if (!left?.n) await fetchNewsImpl(env);
   }
-  const results = await Promise.all(due.results.map((a) => postOne(env, model, a).catch(() => null)));
+  const results = await Promise.all(due.results.map((a) => postOne(env, model, a, Number(s.photo_ratio ?? 30)).catch(() => null)));
   const posted = results.filter(Boolean).length;
   if (posted) await logContent(env.DB, 'post', null, `發文 ${posted} 則（${due.results.filter((_, i) => results[i]).map((a) => a.name).join('、')}）`);
   return posted ? { posted: results.find(Boolean), account: due.results[results.findIndex(Boolean)].name, count: posted } : { skipped: '這次沒有成功發文（可能沒有新聞或 AI 失敗）' };

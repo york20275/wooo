@@ -31,7 +31,7 @@ export function requireHuman(c: any, u: User) {
   if (needsHumanCheck(c.env, u)) throw new HttpError(428, '請先完成人機驗證');
 }
 
-const POST_COLS = `p.id, p.text, p.title, p.kind, p.image_key, p.link_url, p.link_title, p.link_site, p.sensitive, p.source,
+const POST_COLS = `p.id, p.text, p.title, p.kind, p.image_key, p.image_credit, p.image_credit_url, p.link_url, p.link_title, p.link_site, p.sensitive, p.source,
   p.like_count, p.comment_count, p.created_at,
   u.id AS author_id, u.name AS author_name, u.handle AS author_handle, u.avatar_key AS author_avatar, u.is_content AS author_is_content`;
 
@@ -61,6 +61,7 @@ export function serializePost(r: any, likedSet?: Set<string>) {
     title: r.title || null,
     text: r.text,
     image_url: imgUrl(r.image_key),
+    image_credit: r.image_credit ? { name: r.image_credit, url: r.image_credit_url } : null,
     link: r.link_url ? { url: r.link_url, title: r.link_title, site: r.link_site } : null,
     sensitive: !!r.sensitive,
     created_at: r.created_at,

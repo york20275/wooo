@@ -258,6 +258,7 @@ function postCard(p, { onDelete, full = false, pinned = false } = {}) {
   let media = null;
   if (p.image_url) {
     media = h('div', { class: `pimg ${p.sensitive ? 'blur' : ''}` }, h('img', { src: p.image_url, alt: '貼文圖片', loading: 'lazy' }));
+    if (p.image_credit) media.append(h('a', { class: 'credit', href: p.image_credit.url, target: '_blank', rel: 'noopener', onclick: (e) => e.stopPropagation() }, `攝影：${p.image_credit.name}／Pexels`));
     if (p.sensitive) {
       const cover = h('button', { class: 'cover', 'aria-label': '敏感內容，點擊查看' }, icon('eyeoff'), h('b', null, '敏感內容'), h('span', null, '發文者已標記 · 點擊查看'));
       cover.addEventListener('click', () => { media.classList.remove('blur'); cover.remove(); });

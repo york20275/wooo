@@ -112,6 +112,9 @@ const ADMIN = {
     const dailySel = h('select', { 'aria-label': '全站每天發文則數' }, [50, 100, 200, 300, 500, 1000, 2000].map((v) => h('option', { value: String(v), selected: v === d.posts_per_day ? true : null }, `每天約 ${v} 則`)));
     dailySel.addEventListener('change', () => set('daily_posts', dailySel.value).then(() => { toast('已儲存'); ADMIN.content(main); }));
     const cycle = d.posts_per_day ? enabledTotal / d.posts_per_day : 0;
+    const photoSel = h('select', { 'aria-label': '附照片的比例' }, [0, 10, 20, 30, 50, 70].map((v) => h('option', { value: String(v), selected: String(v) === String(s.photo_ratio ?? '30') ? true : null }, v ? `約 ${v}% 的貼文` : '不附照片')));
+    photoSel.addEventListener('change', () => set('photo_ratio', photoSel.value).then(() => toast('已儲存')));
+    const pexKey = h('input', { type: 'password', placeholder: s.pexels_key ? '已設定（輸入新的會覆蓋）' : '貼上 Pexels API Key', autocomplete: 'off' });
     const curModel = s.ai_model || d.default_model;
     const modelSel = h('select', { 'aria-label': 'AI 模型' }, MODELS.map(([v, l]) => h('option', { value: v, selected: v === curModel ? true : null }, l)));
     const perPost = (MODELS.find(([v]) => v === curModel) || MODELS[0])[2];
@@ -134,6 +137,10 @@ const ADMIN = {
           h('div', { class: 'field' }, '輪流狀況', h('b', { style: 'font-size:20px' }, cycle ? `每個帳號約 ${cycle < 1 ? Math.round(cycle * 24) + ' 小時' : cycle.toFixed(1) + ' 天'}輪到一次` : '—'),
             h('span', { class: 'muted' }, `${enabledTotal} 個帳號輪流，每次挑最久沒發文的那個。分組關掉就不會輪到。`)))),
       h('div', { class: 'groups four' }, groupCard('news'), groupCard('game'), groupCard('mixed'), groupCard('fun')),
+      h('section', { class: 'card glass' }, h('h2', null, '真實照片'),
+        h('span', { class: 'muted' }, '時事以外的貼文，部分會從免費圖庫 Pexels 找一張符合內容的真實照片，照片右下角會標示攝影者。到 pexels.com/api 免費申請金鑰（每小時 200 次、每月 2 萬次）。'),
+        h('div', { class: 'groups' }, h('label', { class: 'field' }, '附照片的比例', photoSel),
+          h('label', { class: 'field' }, `Pexels API Key${s.pexels_key ? '（已設定）' : '（未設定，不會附照片）'}`, h('div', { class: 'row' }, pexKey, h('button', { class: 'btn small', onclick: async () => { if (!pexKey.value.trim()) return; await set('pexels_key', pexKey.value.trim()); toast('已儲存'); ADMIN.content(main); } }, '儲存'))))),
       h('section', { class: 'card glass' }, h('h2', null, 'AI 模型與費用'),
         h('div', { class: 'groups' }, h('label', { class: 'field' }, 'AI 模型', modelSel),
           h('div', { class: 'field' }, '預估 AI 費用', h('b', { style: 'font-size:20px' }, monthly < 0.5 ? '免費額度內' : `約 US$${monthly.toFixed(0)}／月`), h('span', { class: 'muted' }, `每天約 ${Math.round(neurons).toLocaleString()} neurons，免費 10,000／天，超過每 1,000 收 US$0.011${monthly < 0.5 ? '。' : '，而且需要 Workers 付費方案 US$5／月。'}`)))),

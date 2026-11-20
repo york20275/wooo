@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS posts (
   user_id TEXT NOT NULL,
   text TEXT NOT NULL,
   image_key TEXT,
+  image_credit TEXT,                         -- 圖庫照片的攝影者（✦ 帳號用）
+  image_credit_url TEXT,                     -- 圖庫照片頁面網址
   link_url TEXT,
   link_title TEXT,
   link_site TEXT,
@@ -233,6 +235,8 @@ CREATE TABLE IF NOT EXISTS daily_active (
 INSERT OR IGNORE INTO settings (key, value) VALUES
   ('content_enabled', '1'),
   ('daily_posts', '200'),                    -- 全站 ✦ 帳號每天約發幾則（輪流）
+  ('photo_ratio', '30'),                     -- 非時事的 ✦ 貼文有幾 % 附真實照片（Pexels）
+  ('pexels_key', ''),
   ('group_fun', '1'),
   ('feed_content_ratio', '50'),              -- 熱門動態牆中 ✦ 內容最多佔幾 %
   ('ai_model', ''),                          -- 空白 = 用 wrangler.toml 的 AI_MODEL
