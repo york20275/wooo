@@ -16,7 +16,8 @@ app.use('*', async (c, next) => {
   if (c.env.DEV_MODE !== '1' && c.env.SITE_URL.startsWith('https://')) {
     const url = new URL(c.req.url);
     const site = new URL(c.env.SITE_URL);
-    if (url.host !== site.host && (url.host === `www.${site.host}` || url.host.endsWith('.workers.dev'))) {
+    const host = (c.req.header('host') || url.host).toLowerCase();
+    if (host !== site.host && (host === `www.${site.host}` || host.endsWith('.workers.dev'))) {
       return c.redirect(site.origin + url.pathname + url.search, 301);
     }
   }
