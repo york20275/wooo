@@ -13,9 +13,9 @@ async function metaFor(env: Env, path: string): Promise<Meta | null> {
       "SELECT p.text, p.title, p.kind, p.image_key, p.sensitive, u.name, u.is_content FROM posts p JOIN users u ON u.id = p.user_id WHERE p.id = ? AND p.hidden = 0 AND u.status != 'banned'"
     ).bind(m[1]).first<any>();
     if (!p) return null;
-    if (p.sensitive) return { title: `${p.name} 在窩Wooo！`, description: '這篇文章含敏感內容，需登入並完成年齡驗證才能查看。', image: null, type: 'article' };
+    if (p.sensitive) return { title: `${p.name} 在窩Woo！`, description: '這篇文章含敏感內容，需登入並完成年齡驗證才能查看。', image: null, type: 'article' };
     return {
-      title: p.kind === 'blog' && p.title ? `${p.title}｜${p.name}` : `${p.name}${p.is_content ? ' ✦' : ''} 在窩Wooo！`,
+      title: p.kind === 'blog' && p.title ? `${p.title}｜${p.name}` : `${p.name}${p.is_content ? ' ✦' : ''} 在窩Woo！`,
       description: clip(p.text || '（圖片）', 140),
       image: p.image_key ? `/img/${p.image_key}` : null,
       type: 'article',
@@ -24,18 +24,18 @@ async function metaFor(env: Env, path: string): Promise<Meta | null> {
   if ((m = path.match(/^\/u\/([\w]+)$/))) {
     const u = await env.DB.prepare("SELECT name, handle, bio, avatar_key, banner_key FROM users WHERE handle = ? AND status != 'banned'").bind(m[1]).first<any>();
     if (!u) return null;
-    return { title: `${u.name}（@${u.handle}）｜窩Wooo！`, description: clip(u.bio || `來窩Wooo！看看 ${u.name} 的日常`, 140), image: u.banner_key ? `/img/${u.banner_key}` : u.avatar_key ? `/img/${u.avatar_key}` : null, type: 'profile' };
+    return { title: `${u.name}（@${u.handle}）｜窩Woo！`, description: clip(u.bio || `來窩Woo！看看 ${u.name} 的日常`, 140), image: u.banner_key ? `/img/${u.banner_key}` : u.avatar_key ? `/img/${u.avatar_key}` : null, type: 'profile' };
   }
   if ((m = path.match(/^\/album\/([\w]+)$/))) {
     const a = await env.DB.prepare(
       "SELECT a.title, a.description, a.sensitive, u.name, (SELECT image_key FROM album_photos ph WHERE ph.album_id = a.id ORDER BY ph.created_at LIMIT 1) AS cover FROM albums a JOIN users u ON u.id = a.user_id WHERE a.id = ?"
     ).bind(m[1]).first<any>();
     if (!a) return null;
-    return { title: `${a.title}｜${a.name} 的相簿`, description: a.sensitive ? '這本相簿含敏感內容。' : clip(a.description || '窩Wooo！相簿', 140), image: !a.sensitive && a.cover ? `/img/${a.cover}` : null };
+    return { title: `${a.title}｜${a.name} 的相簿`, description: a.sensitive ? '這本相簿含敏感內容。' : clip(a.description || '窩Woo！相簿', 140), image: !a.sensitive && a.cover ? `/img/${a.cover}` : null };
   }
   if ((m = path.match(/^\/tag\/(.+)$/))) {
     const tag = decodeURIComponent(m[1]).slice(0, 20);
-    return { title: `#${tag}｜窩Wooo！`, description: `窩Wooo！上關於 #${tag} 的文章`, image: null };
+    return { title: `#${tag}｜窩Woo！`, description: `窩Woo！上關於 #${tag} 的文章`, image: null };
   }
   return null;
 }
@@ -48,7 +48,7 @@ export async function withOg(env: Env, req: Request): Promise<Response> {
   if (!meta) return page;
   const img = new URL(meta.image || '/og.png', url.origin).toString();
   const tags = [
-    `<meta property="og:site_name" content="窩Wooo！">`,
+    `<meta property="og:site_name" content="窩Woo！">`,
     `<meta property="og:type" content="${meta.type || 'website'}">`,
     `<meta property="og:title" content="${esc(meta.title)}">`,
     `<meta property="og:description" content="${esc(meta.description)}">`,

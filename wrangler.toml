@@ -27,7 +27,7 @@ binding = "AI"
 crons = ["*/30 * * * *", "*/10 * * * *"]
 
 [vars]
-SITE_NAME = "窩Wooo！"
+SITE_NAME = "窩Woo！"
 # 網站網址（Google 登入回呼用），上線後改成你的網域
 SITE_URL = "http://localhost:8787"
 # GM 管理員的 Gmail，多個用逗號分隔

@@ -1,4 +1,4 @@
-﻿# 窩Wooo！一鍵部署腳本（Windows PowerShell）
+﻿# 窩Woo！一鍵部署腳本（Windows PowerShell）
 $ErrorActionPreference = 'Continue'
 Set-Location $PSScriptRoot
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
@@ -12,7 +12,7 @@ function SetToml($key, $value) {
   [System.IO.File]::WriteAllText($p, $c, (New-Object System.Text.UTF8Encoding $false))
 }
 
-Write-Host "窩Wooo！一鍵部署" -ForegroundColor Cyan
+Write-Host "窩Woo！一鍵部署" -ForegroundColor Cyan
 Write-Host "過程中會打開瀏覽器兩次：登入 Cloudflare、設定 Google 登入。其他都會自動完成。"
 
 Step "1/8 檢查 Node.js"
@@ -98,7 +98,7 @@ $cb = "$site/auth/google/callback"
 Set-Clipboard -Value $cb -ErrorAction SilentlyContinue
 Write-Host "即將打開 Google Cloud。請照這幾步做："
 Write-Host "  1. 建立一個專案（左上角選專案 → 新增專案）"
-Write-Host "  2. 「OAuth 同意畫面」：類型選「外部」，應用程式名稱填「窩Wooo！」"
+Write-Host "  2. 「OAuth 同意畫面」：類型選「外部」，應用程式名稱填「窩Woo！」"
 Write-Host "  3. 「憑證」→「建立憑證」→「OAuth 用戶端 ID」→ 類型選「網頁應用程式」"
 Write-Host "  4. 「已授權的重新導向 URI」貼上（已複製到剪貼簿）："
 Write-Host "     $cb" -ForegroundColor Yellow

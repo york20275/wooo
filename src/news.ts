@@ -25,7 +25,7 @@ async function fromNewsData(key: string): Promise<NewsItem[]> {
 }
 
 async function fromRss(feed: string): Promise<NewsItem[]> {
-  const res = await fetch(feed, { headers: { 'user-agent': 'WoooBot/1.0' } });
+  const res = await fetch(feed, { headers: { 'user-agent': 'WooBot/1.0' } });
   if (!res.ok) throw new Error(`RSS HTTP ${res.status}`);
   const xml = await res.text();
   const items: NewsItem[] = [];

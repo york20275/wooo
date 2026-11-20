@@ -32,7 +32,7 @@ function clean(t: string): string | null {
   return s.length >= 8 ? s : null;
 }
 
-export const BASE_RULES = `你在社群平台「窩Wooo！」經營一個「平台內容帳號」，網站會在帳號旁標示 ✦ 讓讀者知道。
+export const BASE_RULES = `你在社群平台「窩Woo！」經營一個「平台內容帳號」，網站會在帳號旁標示 ✦ 讓讀者知道。
 規則：
 - 用台灣繁體中文、自然口語，像一般人在社群上發文。
 - 不要提到你是 AI，不要加引號、標題或 Markdown。

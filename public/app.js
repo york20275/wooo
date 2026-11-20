@@ -1,5 +1,5 @@
 'use strict';
-/* 窩Wooo！前端（不需要建置工具的單頁應用程式） */
+/* 窩Woo！前端（不需要建置工具的單頁應用程式） */
 
 const S = { me: null, unread: 0, unreadMsg: 0, dev: false, feedTab: 'hot', turnstile: null, vapid: null, accents: [] };
 const app = document.getElementById('app');
@@ -96,7 +96,7 @@ function modal(title, ...content) {
   bg.remove = ((orig) => () => { orig.call(bg); document.removeEventListener('keydown', onKey); })(bg.remove);
   return bg;
 }
-function needLogin() { modal('先登入吧', h('p', null, '用 Google 帳號就能登入窩Wooo！，按讚、留言、發文。'), loginButton()); }
+function needLogin() { modal('先登入吧', h('p', null, '用 Google 帳號就能登入窩Woo！，按讚、留言、發文。'), loginButton()); }
 function loginButton() {
   const wrap = h('div', { class: 'row wrap' }, h('a', { class: 'btn', href: '/auth/google' }, '用 Google 登入'));
   if (S.dev) wrap.append(h('a', { class: 'btn ghost', href: '/auth/dev?email=tester@example.com&name=測試用戶' }, '測試登入（開發模式）'));
@@ -203,7 +203,7 @@ function header() {
   const form = h('form', { class: 'search', role: 'search', onsubmit: (e) => { e.preventDefault(); if (q.value.trim()) navigate(`/explore?q=${encodeURIComponent(q.value.trim())}`); } }, icon('search'), q);
   const right = S.me ? avatar(S.me) : h('a', { class: 'btn small', href: '/auth/google' }, '登入');
   return h('header', { class: 'top' },
-    h('a', { class: 'logo', href: '/', 'aria-label': '窩Wooo！首頁' }, h('b', null, '窩'), h('span', null, 'Wooo！')),
+    h('a', { class: 'logo', href: '/', 'aria-label': '窩Woo！首頁' }, h('img', { src: '/logo.png', alt: '窩Woo！', width: '106', height: '46' })),
     form, right);
 }
 const dot = (n, label) => (n ? h('span', { class: 'dot', 'aria-label': `${n} ${label}` }) : null);
@@ -234,7 +234,7 @@ function aside() {
   }).catch(() => {});
   return h('aside', { class: 'side' }, box,
     h('p', { class: 'foot' }, h('a', { href: '/about' }, '關於'), ' · ', h('a', { href: '/about#content' }, '✦ 說明'), ' · ', h('a', { href: '/about#rules' }, '社群規範'), h('br'),
-      h('a', { href: '/privacy' }, '隱私權政策'), ' · ', h('a', { href: '/terms' }, '使用條款'), h('br'), '© 2026 窩Wooo！'));
+      h('a', { href: '/privacy' }, '隱私權政策'), ' · ', h('a', { href: '/terms' }, '使用條款'), h('br'), '© 2026 窩Woo！'));
 }
 function shell(path, mainEl) {
   app.replaceChildren(header(), h('div', { class: 'layout' }, sideNav(path), mainEl, aside()), bottomNav(path));
@@ -430,7 +430,7 @@ function feedPage() {
   }, S.feedTab === 'following' ? (S.me ? '你追蹤的人還沒有發文，去探索看看吧' : '登入後就能看到你追蹤的人') : '還沒有文章，來發第一篇吧');
   const tab = (key, label) => h('button', { class: S.feedTab === key ? 'on' : '', role: 'tab', 'aria-selected': String(S.feedTab === key), onclick: () => { S.feedTab = key; render(); } }, label);
   const main = h('main', { class: 'main' },
-    S.me ? composer(() => pl.load(true)) : h('div', { class: 'card glass' }, h('h2', null, '歡迎來到窩Wooo！'), h('p', { style: 'margin:0' }, '一個可以慵懶窩著、隨意分享日常的地方。'), loginButton()),
+    S.me ? composer(() => pl.load(true)) : h('div', { class: 'card glass' }, h('h2', null, '歡迎來到窩Woo！'), h('p', { style: 'margin:0' }, '一個可以慵懶窩著、隨意分享日常的地方。'), loginButton()),
     h('div', { class: 'tabs', role: 'tablist', 'aria-label': '動態牆' }, tab('following', '追蹤中'), tab('hot', '熱門')),
     pl.el);
   shell('/', main);
@@ -524,7 +524,7 @@ async function profilePage(handle, tab) {
     const head = h('section', { class: 'card glass profile', style: `--paccent:${accent}` }, banner,
       h('div', { class: 'row between', style: 'margin-top:-56px;align-items:flex-end;position:relative;z-index:1' }, h('span', { class: 'avatar lg ring' }, u.avatar_url ? h('img', { src: u.avatar_url, alt: '' }) : u.name.slice(0, 1)), actions),
       h('div', null, h('h1', { style: 'font-size:22px' }, u.name, u.is_content ? starButton() : null), h('span', { class: 'muted' }, `@${u.handle}`)),
-      u.is_content ? h('p', { class: 'notice', style: 'margin:0;font-size:13px' }, '✦ 這是平台內容帳號，由窩Wooo！自動發布內容。') : null,
+      u.is_content ? h('p', { class: 'notice', style: 'margin:0;font-size:13px' }, '✦ 這是平台內容帳號，由窩Woo！自動發布內容。') : null,
       d.blocked ? h('p', { class: 'notice', style: 'margin:0;font-size:13px' }, '你已封鎖這位用戶。') : null,
       d.blocked_me ? h('p', { class: 'notice', style: 'margin:0;font-size:13px' }, '你無法查看這位用戶的內容。') : null,
       u.bio ? h('p', { style: 'margin:0;white-space:pre-wrap' }, u.bio) : null,
@@ -799,7 +799,7 @@ async function settingsPage() {
         h('b', { style: 'font-family:var(--round)' }, '需要先完成年齡驗證'),
         h('span', { style: 'font-size:14px' }, '依台灣法規，觀看敏感內容前必須確認你已年滿 18 歲，自己填生日不算數。'),
         h('div', { class: 'row wrap' }, h('button', { class: 'btn small', onclick: verify }, '信用卡驗證'), h('button', { class: 'btn ghost small', onclick: verify }, '身分證件驗證'), h('button', { class: 'icon-btn', onclick: () => panel.replaceChildren() }, '取消')),
-        err, h('span', { class: 'muted' }, '驗證由第三方服務處理，窩Wooo！只記錄「已滿 18 歲」的結果，不保存卡號或證件影像。')));
+        err, h('span', { class: 'muted' }, '驗證由第三方服務處理，窩Woo！只記錄「已滿 18 歲」的結果，不保存卡號或證件影像。')));
     });
     sensitive.append(h('div', { class: 'row between' }, h('span', null, h('span', null, '顯示敏感內容'), h('br'), h('span', { class: 'muted' }, '開啟後，被標記為敏感的貼文會先模糊顯示，點擊才會看到。未滿 18 歲或未完成驗證的帳號永遠看不到。')), sw), panel,
       S.me.age_verified ? h('span', { class: 'ok' }, '✓ 已完成年齡驗證（18 歲以上）') : null);
@@ -811,11 +811,11 @@ async function settingsPage() {
     const psw = h('button', { class: 'switch', role: 'switch', 'aria-checked': String(ps === 'on'), 'aria-label': '推播通知' });
     psw.addEventListener('click', async () => { try { await togglePush(psw.getAttribute('aria-checked') !== 'true'); settingsPage(); } catch (e) { toast(e.message); } });
     notifySec.append(h('div', { class: 'row between' }, h('span', null, '推播通知', h('br'), h('span', { class: 'muted' }, '有人按讚、留言、回覆、提到你或傳私訊時通知你')), psw));
-  } else if (S.me) notifySec.append(h('span', { class: 'muted' }, '這個瀏覽器不支援推播通知。iPhone 請先「加入主畫面」，再從主畫面打開窩Wooo！開啟通知。'));
+  } else if (S.me) notifySec.append(h('span', { class: 'muted' }, '這個瀏覽器不支援推播通知。iPhone 請先「加入主畫面」，再從主畫面打開窩Woo！開啟通知。'));
   notifySec.append(h('div', { class: 'row between wrap' }, h('span', null, '加到手機主畫面', h('br'), h('span', { class: 'muted' }, '像 App 一樣從主畫面打開')),
     h('button', { class: 'btn ghost small', onclick: async () => {
       if (installPrompt) { installPrompt.prompt(); installPrompt = null; }
-      else modal('加到主畫面', h('p', { style: 'margin:0' }, 'iPhone：用 Safari 打開窩Wooo！，按下方「分享」→「加入主畫面」。'), h('p', { style: 'margin:0' }, 'Android：用 Chrome 打開，按右上角「⋮」→「加到主畫面」。'));
+      else modal('加到主畫面', h('p', { style: 'margin:0' }, 'iPhone：用 Safari 打開窩Woo！，按下方「分享」→「加入主畫面」。'), h('p', { style: 'margin:0' }, 'Android：用 Chrome 打開，按右上角「⋮」→「加到主畫面」。'));
     } }, '加到主畫面')));
 
   const account = h('section', { class: 'card glass' }, h('h2', null, '帳號與隱私'));
@@ -861,7 +861,7 @@ async function onboarding() {
   let picked = [];
   const d = await api('GET', '/api/onboarding/suggestions');
   const step = h('div', { class: 'stack' });
-  const m = modal('歡迎來到窩Wooo！', step);
+  const m = modal('歡迎來到窩Woo！', step);
   const step1 = () => {
     const chips = h('div', { class: 'row wrap' }, d.interests.map((t) => {
       const b = h('button', { class: 'chip', 'aria-pressed': 'false' }, t);
@@ -889,9 +889,9 @@ async function onboarding() {
 // ---------- 靜態頁 ----------
 function aboutPage() {
   shell('/about', h('main', { class: 'main' },
-    h('section', { class: 'card glass' }, h('h1', null, '關於窩Wooo！'), h('p', { style: 'margin:0' }, '窩Wooo！是一個可以慵懶窩著、隨意分享日常的社群：短短的動態、長長的網誌、一本本相簿，都歡迎。')),
+    h('section', { class: 'card glass' }, h('h1', null, '關於窩Woo！'), h('p', { style: 'margin:0' }, '窩Woo！是一個可以慵懶窩著、隨意分享日常的社群：短短的動態、長長的網誌、一本本相簿，都歡迎。')),
     h('section', { class: 'card glass', id: 'content' }, h('h2', null, '✦ 平台內容帳號是什麼？'),
-      h('p', { style: 'margin:0' }, '名稱旁邊有 ✦ 的帳號是「平台內容帳號」，由窩Wooo！自動發布時事、遊戲、生活等內容，讓大家一進來就有東西可以看。這些帳號不是個人用戶，也不會主動和你互動或接收私訊。'),
+      h('p', { style: 'margin:0' }, '名稱旁邊有 ✦ 的帳號是「平台內容帳號」，由窩Woo！自動發布時事、遊戲、生活等內容，讓大家一進來就有東西可以看。這些帳號不是個人用戶，也不會主動和你互動或接收私訊。'),
       h('p', { style: 'margin:0' }, '時事類內容是根據新聞來源整理的重點摘要，並附上原文連結，完整內容請以原文為準。')),
     h('section', { class: 'card glass', id: 'rules' }, h('h2', null, '社群規範'),
       h('ul', { class: 'list' },
@@ -908,7 +908,7 @@ function legalPage(title, sections) {
 }
 function privacyPage() {
   legalPage('隱私權政策', [
-    ['一、誰負責保護你的資料', '窩Wooo！（以下稱「本平台」）由 [營運者名稱] 經營。對個人資料有任何問題，請來信 [聯絡 Email]。'],
+    ['一、誰負責保護你的資料', '窩Woo！（以下稱「本平台」）由 [營運者名稱] 經營。對個人資料有任何問題，請來信 [聯絡 Email]。'],
     ['二、我們蒐集哪些資料', ['Google 帳號提供的姓名、Email 與帳號識別碼（用於登入）。', '你主動提供的內容：個人資料、文章、網誌、相簿、留言、私訊、檢舉內容。', '使用紀錄：登入時間、瀏覽個人頁的訪客統計（未登入者僅保存經雜湊處理的識別值，兩天後刪除）。', '年齡驗證結果：只保存「是否已滿 18 歲」，不保存卡號或證件影像。', '推播通知訂閱資訊（你開啟推播時）。']],
     ['三、蒐集目的與使用方式', '提供社群服務、帳號管理、通知、內容審核與檢舉處理、防止濫用與詐騙、統計分析與服務改善。我們不會販售你的個人資料。'],
     ['四、資料保存與處理地點', '資料保存在 Cloudflare 提供的雲端服務（資料庫與圖片儲存），可能位於台灣以外的地區。時事內容的 AI 摘要由 Cloudflare Workers AI 處理，不會傳送你的個人資料。'],
@@ -920,7 +920,7 @@ function privacyPage() {
 }
 function termsPage() {
   legalPage('使用條款', [
-    ['一、接受條款', '使用窩Wooo！（以下稱「本平台」）即表示你同意本條款與社群規範。若不同意，請停止使用。'],
+    ['一、接受條款', '使用窩Woo！（以下稱「本平台」）即表示你同意本條款與社群規範。若不同意，請停止使用。'],
     ['二、帳號', ['你必須使用自己的 Google 帳號登入，並對帳號下的所有行為負責。', '不得冒用他人身分、買賣或轉讓帳號。']],
     ['三、你的內容', '你保有自己發布內容的著作權，但同意授權本平台在提供服務的範圍內儲存、顯示與傳輸這些內容。你保證發布的內容不侵害他人權利。'],
     ['四、禁止行為', ['涉及未成年的性相關內容（包含繪圖與 AI 生成）、未經同意的私密影像、暴力或性虐待內容。', '騷擾、仇恨、詐騙、垃圾訊息、惡意程式、侵害著作權或隱私。', '未標記的敏感內容、在大頭貼或橫幅使用敏感內容。', '以自動化方式大量註冊、發文或擷取資料。']],

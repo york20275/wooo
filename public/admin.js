@@ -1,5 +1,5 @@
 'use strict';
-/* 窩Wooo！GM 後台 */
+/* 窩Woo！GM 後台 */
 
 async function adminPage(tab) {
   if (!S.me || S.me.role !== 'gm') { shell('', h('main', { class: 'main' }, h('div', { class: 'empty glass' }, '只有 GM 可以使用後台'))); return; }

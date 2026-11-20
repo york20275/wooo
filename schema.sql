@@ -1,4 +1,4 @@
--- 窩Wooo！資料庫結構（Cloudflare D1 / SQLite）
+-- 窩Woo！資料庫結構（Cloudflare D1 / SQLite）
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,

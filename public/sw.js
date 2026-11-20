@@ -1,5 +1,5 @@
-/* 窩Wooo！Service Worker：離線外框快取 + 推播通知 */
-const CACHE = 'wooo-v2';
+/* 窩Woo！Service Worker：離線外框快取 + 推播通知 */
+const CACHE = 'woo-v3';
 const SHELL = ['/', '/style.css', '/app.js', '/admin.js', '/manifest.webmanifest', '/icon-192.png'];
 
 self.addEventListener('install', (e) => {
@@ -25,7 +25,7 @@ self.addEventListener('fetch', (e) => {
 });
 
 self.addEventListener('push', (e) => {
-  let data = { title: '窩Wooo！', body: '', url: '/' };
+  let data = { title: '窩Woo！', body: '', url: '/' };
   try { data = { ...data, ...e.data.json() }; } catch {}
   e.waitUntil(self.registration.showNotification(data.title, { body: data.body, icon: '/icon-192.png', badge: '/icon-192.png', data: { url: data.url }, tag: data.url }));
 });

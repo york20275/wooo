@@ -1,4 +1,4 @@
-# 窩Wooo！社群平台
+# 窩Woo！社群平台
 
 Cloudflare Workers + D1 資料庫 + R2 圖片儲存 + Workers AI。前期幾乎免費。
 
@@ -49,7 +49,7 @@ npm run db:init           # 建立資料表＋150 個內容帳號
 ### 3. 申請 Google 登入金鑰
 
 1. 到 Google Cloud Console（console.cloud.google.com）建立一個專案。
-2. 「API 和服務」→「OAuth 同意畫面」：類型選「外部」，填網站名稱「窩Wooo！」與你的 Email。
+2. 「API 和服務」→「OAuth 同意畫面」：類型選「外部」，填網站名稱「窩Woo！」與你的 Email。
 3. 「憑證」→「建立憑證」→「OAuth 用戶端 ID」→ 類型「網頁應用程式」。
 4. 「已授權的重新導向 URI」填：`https://你的網域/auth/google/callback`
    （還沒有網域的話，先部署一次拿到 `https://wooo.你的帳號.workers.dev`，再回來填）
@@ -143,7 +143,7 @@ AI 模型在 `wrangler.toml` 的 `AI_MODEL` 改。Workers AI 有每日免費額�
 - [ ] 隱私權政策與使用條款（`/privacy`、`/terms`）目前是範本，請把 [營運者名稱]、[聯絡 Email]、[管轄法院]、[日期] 換成實際資料，並請律師看過。內容在 `public/app.js` 的 `privacyPage()`、`termsPage()`。
 - [ ] 敏感內容的隔絕機制請熟悉網路法的律師確認（台灣法院曾認定只靠自填生日不算合格的隔絕措施）。
 - [ ] 敏感圖片：圖片網址是公開的（跟 Threads 一樣，模糊只在畫面上），拿到網址的人可以直接看到。這是刻意的選擇，若之後要加強，可以改成伺服器端檢查年齡驗證才給圖。
-- [ ] 商標：「Wooo」與第 45 類已註冊的 WOO、WOOTALK 近似，正式使用或註冊前請商標代理人確認。
+- [ ] 商標：「Woo」和第 45 類（社群網路服務）已註冊的「WOO」相同、與「WOOTALK」近似，正式使用或申請註冊前請商標代理人確認。
 - [ ] `DEV_MODE = "0"`。
 
 ## 檔案結構
