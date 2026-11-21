@@ -321,7 +321,7 @@ admin.get('/text-test', async (c) => {
   if (!obj) return c.json({ error: 'not found' });
   const bin = new Uint8Array(await obj.arrayBuffer());
   const model = c.req.query('m') || '@cf/llava-hf/llava-1.5-7b-hf';
-  const q = 'Is there any visible text, letters, characters, numbers, logo or watermark anywhere in this image, even small or blurry? Answer only yes or no.';
+  const q = c.req.query('q') || 'Look carefully at this image. Is there any written text in it: words, Chinese or other characters, a watermark, caption, sign or label with writing (ignore keyboard keys and plain decorations)? Reply with exactly one word: YES or NO.';
   try {
     let b64 = ''; for (let i = 0; i < bin.length; i += 0x8000) b64 += String.fromCharCode(...bin.subarray(i, i + 0x8000));
     const url = `data:image/jpeg;base64,${btoa(b64)}`;

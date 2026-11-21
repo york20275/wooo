@@ -127,16 +127,20 @@ async function openverseSquare(query: string) {
 
 export const IMAGE_MODEL = '@cf/black-forest-labs/flux-1-schnell';
 
-/** 用 AI 生成一張圖存到 R2（不用別人的照片）。失敗就回傳 null */
 /** 容易帶出文字的東西（包裝、招牌、書、螢幕…），從畫面描述裡拿掉或換成沒有字的版本 */
 const TEXTY = /\b(text|letters?|words?|sign|signs|signboard|label|labels|logo|logos|brand|branded|package|packages|packaging|box|boxes|carton|bag of \w+|snack bags?|menu|poster|book|books|newspaper|magazine|receipt|ticket|screen|monitor|phone|smartphone|tv|television|computer|laptop|keyboard|watermark|caption|subtitle)\b/gi;
 
 /** 用視覺模型檢查圖裡有沒有任何文字（AI 圖常出現亂碼字） */
 async function hasText(env: Env, bin: Uint8Array): Promise<boolean> {
   try {
-    const r = (await env.AI.run('@cf/llava-hf/llava-1.5-7b-hf' as any, { image: [...bin], prompt: 'Is there any visible text, letters, characters, numbers, logo or watermark anywhere in this image, even small or blurry? Answer only yes or no.', max_tokens: 5 })) as any;
-    return /yes/i.test(String(r?.description || r?.response || ''));
-  } catch { return false; }
+    let b64 = ''; for (let i = 0; i < bin.length; i += 0x8000) b64 += String.fromCharCode(...bin.subarray(i, i + 0x8000));
+    const r = (await env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct' as any, {
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'Look carefully at this image. Is there any written text in it: words, Chinese or other characters, a watermark, caption, sign or label with writing (ignore keyboard keys and plain decorations)? Reply with exactly one word: YES or NO.' }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${btoa(b64)}` } }] }],
+      max_tokens: 5,
+    })) as any;
+    const ans = String(r?.choices?.[0]?.message?.content ?? r?.response ?? '');
+    return /yes/i.test(ans);
+  } catch (e) { console.log('hasText', String(e)); return false; }
 }
 
 /** 用 AI 生成一張圖存到 R2（不用別人的照片）。圖裡有文字就重畫，兩次都有就不要圖 */
