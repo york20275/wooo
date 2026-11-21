@@ -333,7 +333,8 @@ api.get('/feed', async (c) => {
     ).bind(...vb, ...(board ? [board.id] : []), now() - 2 * 86400_000).all();
     const t = now();
     const ranked = r.results
-      .map((x: any) => ({ x, s: (x.real_like_count + 1) / Math.pow((t - x.created_at) / 3600_000 + 2, 1.5) }))
+      // 像脆的「為你推薦」：看互動熱度（讚、留言、轉發、瀏覽），越新越前面，不限追蹤對象
+      .map((x: any) => ({ x, s: (x.real_like_count + (x.comment_count || 0) * 2 + (x.repost_count || 0) * 3 + (x.view_count || 0) * 0.02 + 1) / Math.pow((t - x.created_at) / 3600_000 + 2, 1.5) }))
       .sort((a, b) => b.s - a.s)
       .map((y) => y.x);
     // ✦ 內容帳號的貼文最多只能佔熱門動態牆的一定比例，避免把真人的文洗掉

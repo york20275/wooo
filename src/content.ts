@@ -45,7 +45,7 @@ function chooseBoard(boards: Board[], a: Account, isNews: boolean): Board | null
   return weighted[weighted.length - 1].b;
 }
 
-type Style = 'banter' | 'joke' | 'adult' | 'normal' | 'topic';
+type Style = 'banter' | 'joke' | 'adult' | 'normal' | 'topic' | 'ask' | 'observe';
 interface HotTopic { name: string; facts: string; ratio: number; groups?: string[] }
 
 export function hotTopics(s: Record<string, string>): HotTopic[] {
@@ -60,8 +60,8 @@ function chooseStyle(s: Record<string, string>, a: Account): { style: Style; top
   }
   const adult = Math.max(0, Math.min(40, Number(s.adult_ratio ?? 10)));
   const w: [Style, number][] = a.content_group === 'fun'
-    ? [['banter', 30], ['joke', 30], ['adult', adult], ['normal', 30]]
-    : [['banter', 35], ['joke', 20], ['adult', adult], ['normal', 35]];
+    ? [['banter', 25], ['joke', 25], ['adult', adult], ['observe', 20], ['ask', 15], ['normal', 15]]
+    : [['banter', 25], ['joke', 15], ['adult', adult], ['ask', 20], ['observe', 15], ['normal', 25]];
   let r = Math.random() * w.reduce((n, x) => n + x[1], 0);
   for (const [st, n] of w) { r -= n; if (r <= 0) return { style: st, topic: null }; }
   return { style: 'normal', topic: null };
@@ -124,6 +124,10 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
     normal: a.content_group === 'fun'
       ? `${when}寫一則好笑的生活小事，1 到 3 句話、20 到 80 個字。要是真實生活中會發生、大家看了會說「我也是」的事，不要為了反轉硬編不合理的情節。不要提到真實人名、店名或品牌。`
       : `${when}依照你的主題與個性，寫一則簡短的社群貼文，1 到 3 句話、20 到 80 個字，可以問大家一個輕鬆的問題。`,
+    // 脆爆紅的手法：「不懂就問」讓大家搶著回答、留言區比本文還熱鬧
+    ask: `${when}發一則讓大家忍不住想回答的問句貼文，10 到 50 個字。可以是「不懂就問」、求推薦、二選一、你們都怎麼做、有人跟我一樣嗎。問題要具體、跟你的主題有關、真實生活會遇到，不要附答案。`,
+    // 脆爆紅的手法：日常裡的小觀察、溫馨或好笑的瞬間，看了想按讚分享
+    observe: `${when}分享一個你在日常生活中觀察到的小瞬間，15 到 60 個字：路上、捷運、超商、公司、家裡看到的有趣、溫馨或讓人會心一笑的事。要像真的看到的，寫得口語、有畫面，不要說教、不要提真實人名或店名。`,
     topic: `${when}最近大家都在聊「${topic?.name}」。用玩家的口吻發一則貼文，可以是心得、吐槽、期待、新手建議或問大家問題，20 到 100 個字，可以加 #${(topic?.name || '').replace(/\s+/g, '')}。
 具體資訊只能用下面提供的內容，不要捏造任務名稱、數字、角色、地點或彩蛋；沒提供的細節就講個人感受或一般玩法建議。
 已知資訊：${topic?.facts || ''}${headlines.length ? `\n最近新聞標題：\n${headlines.slice(0, 6).join('\n')}` : ''}`,
