@@ -301,6 +301,18 @@ const ADMIN = {
       h('div', { class: 'groups four' }, groupCard('news'), groupCard('game'), groupCard('mixed'), groupCard('fun'), groupCard('commenter')),
       d.groups.commenter ? null : h('section', { class: 'card glass' }, h('h2', null, '留言專用帳號'), h('span', { class: 'muted' }, '還沒建立 200 個留言專用 ✦ 帳號。'), h('button', { class: 'btn', style: 'align-self:flex-start', onclick: async () => { const r = await api('POST', '/api/admin/content/seed-commenters'); toast(`已建立 ${r.added} 個`); ADMIN.content(main); } }, '建立 200 個留言帳號')),
       topicsCard(s, set),
+      (() => {
+        const inp = h('input', { type: 'url', placeholder: '貼上文章或影片網址，例如 https://www.threads.com/@xxx/post/...', style: 'flex:1;min-width:260px' });
+        const out = h('span', { class: 'muted' });
+        const go = h('button', { class: 'btn small', onclick: async () => {
+          if (!inp.value.trim()) return;
+          go.disabled = true; out.textContent = '轉貼中…（AI 會寫一兩句看法，大約 10 秒）';
+          try { const r = await api('POST', '/api/admin/content/share-url', { url: inp.value.trim() }); out.textContent = r.posted ? `✓ 已由「${r.account}」轉貼：${r.title}` : r.error; if (r.posted) inp.value = ''; }
+          catch (e) { out.textContent = e.message; }
+          go.disabled = false;
+        } }, '轉貼');
+        return h('section', { class: 'card glass' }, h('h2', null, '轉貼網址'), h('span', { class: 'muted' }, '看到不錯的文章或影片，貼上網址，會由一個 ✦ 帳號轉貼：附一兩句看法和原文連結、縮圖，不複製原文內容。政治文會自動保持中立。'), h('div', { class: 'row wrap' }, inp, go), out);
+      })(),
       h('section', { class: 'card glass' }, h('h2', null, '真實照片'),
         h('span', { class: 'muted' }, '時事以外的貼文，部分會從免費圖庫找一張符合內容的真實照片，右下角標示攝影者。不填金鑰也會用 Openverse（CC0／公眾領域／CC BY 授權）；填了 Pixabay 金鑰（pixabay.com/api/docs 免費申請）畫質更好。'),
         h('div', { class: 'groups' }, h('label', { class: 'field' }, '附照片的比例', photoSel),

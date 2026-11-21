@@ -4,7 +4,7 @@ import { BASE_RULES, generate } from './ai';
 import { fetchNews as fetchNewsImpl, takeNews, type NewsItem } from './news';
 import { addComment, addLike } from './api';
 import { aiImage, assignAvatars, splitPhotoLine, topicQuery } from './photos';
-import { cleanupStories, runDailyPoll } from './features';
+import { cleanupStories, runDailyPoll, runIssuePoll } from './features';
 import { migrate } from './migrate';
 import { fetchVideos, takeVideo, type Video } from './videos';
 
@@ -157,6 +157,33 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
 }
 
 const POLITICAL = /選舉|選戰|候選人|參選|市長|縣長|議員|立委|立法院|總統|政見|政黨|國民黨|民進黨|民眾黨|時代力量|藍營|綠營|白營|罷免|公投|投票日|拜票|造勢|辯論會/;
+
+/** 讀網頁的標題、摘要（og:title / og:description） */
+export async function pageMeta(url: string): Promise<{ title: string; description: string; site: string } | null> {
+  try {
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WooBot/1.0; +https://wootw.com)', accept: 'text/html' }, redirect: 'follow', signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return null;
+    const html = (await r.text()).slice(0, 400_000);
+    const meta = (k: string) => (html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${k}["'][^>]*content=["']([^"']*)["']`, 'i')) || html.match(new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*(?:property|name)=["']${k}["']`, 'i')))?.[1];
+    const dec = (s = '') => s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+    const title = dec(meta('og:title') || html.match(/<title>([^<]*)<\/title>/i)?.[1] || '');
+    if (!title) return null;
+    return { title: title.slice(0, 200), description: dec(meta('og:description') || meta('description') || '').slice(0, 500), site: dec(meta('og:site_name') || new URL(r.url).hostname) };
+  } catch { return null; }
+}
+
+/** GM 指定網址，由一個 ✦ 帳號轉貼（附一兩句看法＋原文連結與縮圖） */
+export async function shareUrl(env: Env, url: string) {
+  const m = await pageMeta(url);
+  if (!m) return { error: '讀不到這個網址的標題，可能需要登入或擋爬蟲' };
+  const s = await getSettings(env.DB);
+  const a = await env.DB.prepare("SELECT id, name, handle, content_group, persona FROM users WHERE is_content = 1 AND content_enabled = 1 AND content_group IN ('mixed', 'news', 'fun') ORDER BY COALESCE(last_posted_at, 0) ASC LIMIT 1").first<Account>();
+  if (!a) return { error: '沒有可用的內容帳號' };
+  const boards = (await env.DB.prepare('SELECT id, name, description, content_group FROM communities').all<Board>()).results;
+  const toBack = env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(now(), a.id);
+  const id = await postShare(env, s.ai_model || env.AI_MODEL, a, { url, title: m.title, description: m.description, source: m.site }, boards, toBack);
+  return id ? { posted: id, account: a.name, title: m.title } : { error: 'AI 寫的轉貼文沒通過檢查，請再試一次' };
+}
 
 async function takePolitical(env: Env): Promise<NewsItem | null> {
   const rows = (await env.DB.prepare('SELECT url, title, source, description FROM news_cache WHERE used = 0 AND fetched_at > ? ORDER BY fetched_at DESC LIMIT 60').bind(now() - 36 * 3600_000).all<NewsItem>()).results;
@@ -427,6 +454,8 @@ export async function handleCron(env: Env, _cron: string) {
   if (m === 15 || m === 45) await fetchVideos(env).catch((e) => console.log('videos', String(e)));
   // 每日投票：台灣時間 10:00 起每 10 分鐘檢查一次（今天發過就跳過）
   if (d.getUTCHours() >= 2 && d.getUTCHours() < 14 && m % 10 === 0) await runDailyPoll(env).catch((e) => console.log('daily poll', String(e)));
+  // 議題投票：台灣時間 12:00 起每 10 分鐘檢查一次
+  if (d.getUTCHours() >= 4 && d.getUTCHours() < 14 && m % 10 === 5) await runIssuePoll(env).catch((e) => console.log('issue poll', String(e)));
   if (m % 10 === 3) await cleanupStories(env).catch((e) => console.log('stories cleanup', String(e)));
   if (m === 5) {
     // 清理：兩天前的訪客紀錄、過期的登入、90 天前的每日活躍、30 天前的內容紀錄

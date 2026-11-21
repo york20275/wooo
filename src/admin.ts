@@ -6,10 +6,11 @@ import { runDailyPoll } from './features';
 import { aiImage, assignAvatars, findPhoto } from './photos';
 import { migrate } from './migrate';
 import { serverStats } from './monitor';
+import { runIssuePoll } from './features';
 import { fetchVideos } from './videos';
 import { HttpError, deletePost } from './api';
 import { deleteUserData } from './social';
-import { runPostTick, fetchNews, dailyPosts, seedCommenters } from './content';
+import { runPostTick, fetchNews, dailyPosts, seedCommenters, shareUrl, pageMeta } from './content';
 
 export const admin = new Hono<AppEnv>();
 
@@ -208,7 +209,7 @@ admin.patch('/content/:id', async (c) => {
 });
 
 const EDITABLE = ['content_enabled', 'daily_posts', 'interact_like', 'interact_comment', 'old_posts_mode',
-  'group_news', 'group_game', 'group_mixed', 'group_fun', 'paused_until', 'newsdata_key', 'rss_feeds', 'feed_content_ratio', 'ai_model', 'photo_ratio', 'pexels_key', 'pixabay_key', 'community_ratio', 'daily_poll', 'adult_ratio', 'comment_min', 'comment_max', 'comment_model', 'group_commenter', 'hot_topics', 'cf_plan', 'video_ratio', 'share_ratio'];
+  'group_news', 'group_game', 'group_mixed', 'group_fun', 'paused_until', 'newsdata_key', 'rss_feeds', 'feed_content_ratio', 'ai_model', 'photo_ratio', 'pexels_key', 'pixabay_key', 'community_ratio', 'daily_poll', 'adult_ratio', 'comment_min', 'comment_max', 'comment_model', 'group_commenter', 'hot_topics', 'cf_plan', 'video_ratio', 'share_ratio', 'issue_poll'];
 export const AI_MODELS = ['', '@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct-fp8-fast', '@cf/meta/llama-4-scout-17b-16e-instruct'];
 admin.patch('/settings', async (c) => {
   const b = await c.req.json<Record<string, any>>();
@@ -349,6 +350,18 @@ admin.get('/image-test', async (c) => {
 admin.post('/content/avatars-now', async (c) => c.json({ done: await assignAvatars(c.env, 5) }));
 
 admin.post('/migrate', async (c) => c.json({ applied: await migrate(c.env) }));
+
+admin.post('/content/share-url', async (c) => {
+  const b = await c.req.json<any>().catch(() => ({}));
+  const url = String(b.url || '').trim();
+  if (!/^https?:\/\/[^\s]+$/.test(url)) throw new HttpError(400, '請貼上完整網址');
+  if (b.preview) return c.json({ meta: await pageMeta(url) });
+  const r = await shareUrl(c.env, url);
+  if ('posted' in r) await logAudit(c.env.DB, c.get('user')!.id, 'share_url', r.posted as string, url);
+  return c.json(r);
+});
+
+admin.post('/content/issue-poll', async (c) => c.json(await runIssuePoll(c.env, true)));
 
 admin.post('/content/fetch-videos', async (c) => c.json({ added: await fetchVideos(c.env) }));
 

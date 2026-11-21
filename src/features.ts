@@ -287,6 +287,39 @@ const FALLBACK_POLLS: [string, string[]][] = [
 ];
 
 /** 排程：每天台灣時間 10 點由 ✦ 帳號發一題全站投票 */
+/** 議題投票：只問「在意哪些議題、怎麼做決定」，不提任何候選人或政黨，每天中午一題，發在政治議題版 */
+const ISSUE_POLLS: [string, string[]][] = [
+  ['這次地方選舉，你最在意哪個議題？', ['交通建設', '房價居住', '治安', '長照與醫療', '教育與托育']],
+  ['你通常怎麼決定要投給誰？', ['看政見', '看過去政績', '看政黨', '看辯論表現', '還沒決定']],
+  ['你主要從哪裡得到選舉資訊？', ['電視新聞', '網路新聞', '社群平台', '親友討論', '政見發表會']],
+  ['你覺得政見發表會有幫助嗎？', ['很有幫助', '有一點', '沒什麼幫助', '從來沒看過']],
+  ['怎麼做最能提高年輕人投票率？', ['不在籍投票', '更多網路資訊', '政見貼近年輕人', '投票日交通補助', '其他']],
+  ['你這次會回戶籍地投票嗎？', ['會', '不會', '還在考慮', '戶籍就在住的地方']],
+  ['選舉期間最讓你受不了的是？', ['宣傳車太吵', '假訊息', '互相抹黑', '旗幟看板太多', '都還好']],
+  ['你希望你住的城市優先改善什麼？', ['大眾運輸', '公園綠地', '停車問題', '人行道安全', '空氣品質']],
+];
+export async function runIssuePoll(env: Env, force = false) {
+  const s = await getSettings(env.DB);
+  if (!force && (s.issue_poll === '0' || s.content_enabled !== '1')) return { skipped: '議題投票已關閉' };
+  const board = await env.DB.prepare("SELECT id FROM communities WHERE slug = 'politics'").first<{ id: string }>();
+  if (!board) return { skipped: '沒有政治議題版' };
+  const todayStart = (() => { const d = new Date(Date.now() + 8 * 3600_000); d.setUTCHours(0, 0, 0, 0); return d.getTime() - 8 * 3600_000; })();
+  if (!force && (await env.DB.prepare("SELECT 1 FROM posts WHERE community_id = ? AND text LIKE '【議題投票】%' AND created_at >= ?").bind(board.id, todayStart).first())) return { skipped: '今天已經發過' };
+  const done = (await env.DB.prepare("SELECT text FROM posts WHERE text LIKE '【議題投票】%'").all<{ text: string }>()).results.map((r) => r.text);
+  const left = ISSUE_POLLS.filter(([q]) => !done.some((t) => t.includes(q)));
+  const [question, options] = (left.length ? left : ISSUE_POLLS)[Math.floor(Math.random() * (left.length || ISSUE_POLLS.length))];
+  const a = await env.DB.prepare("SELECT id FROM users WHERE is_content = 1 AND content_enabled = 1 AND content_group IN ('news', 'mixed') ORDER BY RANDOM() LIMIT 1").first<{ id: string }>();
+  if (!a) return { skipped: '沒有可用的內容帳號' };
+  const id = newId();
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO posts (id, user_id, text, community_id, source, created_at) VALUES (?, ?, ?, ?, 'content', ?)").bind(id, a.id, `【議題投票】${question}\n投完歡迎留言說說你的理由，理性討論 🙏\n#議題投票`, board.id, now()),
+    env.DB.prepare('INSERT INTO polls (post_id, ends_at) VALUES (?, ?)').bind(id, now() + 3 * 86400_000),
+    ...options.map((o, i) => env.DB.prepare('INSERT INTO poll_options (post_id, idx, text) VALUES (?, ?, ?)').bind(id, i, o)),
+    env.DB.prepare('UPDATE communities SET post_count = post_count + 1 WHERE id = ?').bind(board.id),
+  ]);
+  return { posted: id, question };
+}
+
 export async function runDailyPoll(env: Env, force = false) {
   const s = await getSettings(env.DB);
   if (!force && (s.daily_poll === '0' || s.content_enabled !== '1')) return { skipped: '每日投票已關閉' };
