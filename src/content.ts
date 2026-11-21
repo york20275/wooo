@@ -92,7 +92,7 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
 具體資訊只能用下面提供的內容，不要捏造任務名稱、數字、角色、地點或彩蛋；沒提供的細節就講個人感受或一般玩法建議。
 已知資訊：${topic?.facts || ''}${headlines.length ? `\n最近新聞標題：\n${headlines.slice(0, 6).join('\n')}` : ''}`,
   };
-  const photoAsk = wantPhoto ? '\n這篇會配一張照片：寫完貼文後，另起最後一行寫「PHOTO: 」加上 2 到 4 個英文單字，描述適合搭配的照片場景或物品（不要人物）。' : '';
+  const photoAsk = wantPhoto ? '\n這篇會配一張照片：寫完貼文後，另起最後一行寫「PHOTO: 」加上 2 到 4 個英文單字，描述適合搭配的照片場景或物品（不要人物）。如果是笑話或幹話，就挑跟笑點有關、看了會心一笑的東西或動物，例如 big handbag、sleepy cat。' : '';
   const out = await generate(env, system, prompts[style] + photoAsk, style === 'banter' ? 80 : 220, model);
   if (out && !REFUSAL.test(out)) return out.replace(/^["「『]|["」』]$/g, '').trim();
   if (out) return null;
@@ -118,7 +118,8 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
     headlines = r.results.map((x) => x.title);
   }
   if (style === 'adult') board = boards.find((b) => b.id === 'cm_free') || board;
-  const wantPhoto = !news && (style === 'normal' || style === 'topic') && Math.random() * 100 < photoRatio;
+  // 笑話、幹話也配圖（梗圖感的相關照片）；成人梗不配圖
+  const wantPhoto = !news && style !== 'adult' && Math.random() * 100 < (style === 'joke' || style === 'banter' ? Math.max(photoRatio, 50) : photoRatio);
   const raw = await writePost(env, model, a, news, wantPhoto, board, style, topic, headlines);
   if (!raw) {
     await toBack.run();
