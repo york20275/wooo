@@ -71,8 +71,14 @@ function chooseStyle(s: Record<string, string>, a: Account): { style: Style; top
 const REFUSAL = /抱歉|對不起，我|我無法|我不能|無法提供|不適合提供|作為(一個)?(AI|人工智慧|語言模型)|AI 助理/;
 
 /** 常見錯字（模型偶爾寫出的異體字或形近字） */
+/** 大陸用語換成台灣用語 */
+const TW_TERMS: [RegExp, string][] = [[/視頻/g, '影片'], [/質量/g, '品質'], [/信息/g, '訊息'], [/軟件/g, '軟體'], [/硬件/g, '硬體'], [/網絡/g, '網路'], [/屏幕/g, '螢幕'], [/手機殼/g, '手機殼'], [/打印/g, '列印'], [/優化/g, '最佳化'], [/鼠標/g, '滑鼠'], [/出租車/g, '計程車'], [/地鐵/g, '捷運'], [/公交車?/g, '公車'], [/自行車/g, '腳踏車'], [/土豆/g, '馬鈴薯'], [/西紅柿/g, '番茄'], [/早上好/g, '早安'], [/晚上好/g, '晚安'], [/牛逼/g, '超猛'], [/靠譜/g, '可靠'], [/給力/g, '讚'], [/點贊/g, '按讚'], [/博主/g, '版主'], [/網友們/g, '大家'], [/搞定/g, '搞定'], [/小伙伴/g, '朋友'], [/閨蜜/g, '好姊妹'], [/渠道/g, '管道'], [/激活/g, '啟用'], [/默認/g, '預設'], [/數據/g, '資料'], [/程序/g, '程式'], [/攝像頭/g, '鏡頭'], [/服務器/g, '伺服器'], [/U盤/g, '隨身碟'], [/幹嘛呢/g, '在幹嘛'], [/挺好/g, '還不錯'], [/咋/g, '怎麼']];
+/** 出現簡體字就不用（模型偶爾混簡體） */
+const SIMPLIFIED = /[这们说还个来对时会过没发问题吗让给经么样开关点头见进现实东车门长书买卖电话语认识应该视频网络软]/;
+export function toTaiwan(t: string) { return TW_TERMS.reduce((s, [re, to]) => s.replace(re, to), t); }
+
 const TYPOS: [RegExp, string][] = [[/倒楉|倒霉/g, '倒楣'], [/重來沒/g, '從來沒'], [/在也不/g, '再也不'], [/因該/g, '應該'], [/以經/g, '已經'], [/真的假的阿/g, '真的假的啊']];
-function fixTypos(t: string) { return TYPOS.reduce((s, [re, to]) => s.replace(re, to), t); }
+function fixTypos(t: string) { return toTaiwan(TYPOS.reduce((s, [re, to]) => s.replace(re, to), t)); }
 
 /** 發文前再檢查一次：不合常理就不發；合理就只修錯字。短文（幹話）不檢查以節省用量 */
 async function reviewPost(env: Env, model: string, text: string, facts = ''): Promise<string | null> {
@@ -137,6 +143,7 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
   };
   const photoAsk = wantPhoto ? '\n這篇會配一張用手機隨手拍的照片：寫完貼文後，另起最後一行寫「PHOTO: 」加上 8 到 20 個英文單字，具體描述照片畫面，要跟貼文內容一致（例如貼文說客廳很亂，就寫 messy living room with clothes and empty cups on the sofa）。畫面只能有物品、食物、動物、地點或風景，絕對不能有人、人臉、手或身體，也不要有包裝盒、招牌、書本、螢幕這類會有字的東西。' : '';
   const out = await generate(env, system, prompts[style] + photoAsk, style === 'banter' ? 80 : 220, model);
+  if (out && SIMPLIFIED.test(out)) return null;
   if (out && !REFUSAL.test(out)) {
     const lines = out.replace(/^["「『]|["」』]$/g, '').trim().split('\n');
     const photoLine = /^PHOTO\s*[:：]/i.test(lines[lines.length - 1] || '') ? lines.pop()! : '';
@@ -147,6 +154,35 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
   if (out) return null;
   if (env.DEV_MODE !== '1') return null; // 正式環境 AI 失敗就不發，避免重複的罐頭文
   return pick(style === 'banter' ? ['好想下班', '今天也是廢廢的一天', '肚子餓到可以吃下一頭牛'] : style === 'joke' ? ['為什麼海很鹹？因為魚在裡面流汗。'] : [`${twNow()}，又是想窩著什麼都不做的時刻。大家現在在做什麼？`]);
+}
+
+const POLITICAL = /選舉|選戰|候選人|參選|市長|縣長|議員|立委|立法院|總統|政見|政黨|國民黨|民進黨|民眾黨|時代力量|藍營|綠營|白營|罷免|公投|投票日|拜票|造勢|辯論會/;
+
+/** 分享一篇網路文章：只根據標題與摘要講一兩句看法，附原文連結（不複製文章內容） */
+async function postShare(env: Env, model: string, a: Account, item: NewsItem, boards: Board[], toBack: D1PreparedStatement): Promise<string | null> {
+  const political = POLITICAL.test(item.title + (item.description || ''));
+  const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。`;
+  const rule = political
+    ? '這是選舉／政治相關的新聞。保持中立：可以點出新聞重點、問大家怎麼看或關心哪些議題，絕對不能支持或反對任何候選人、政黨，不能叫人投給誰或不要投給誰，也不能嘲諷任何一方。'
+    : '可以是感想、吐槽、驚訝或問大家怎麼看。';
+  const prompt = `你要在社群轉貼一篇文章，附上一兩句話。文章標題：「${item.title}」\n摘要：${(item.description || '（無）').slice(0, 300)}
+用 1 到 2 句話、10 到 60 個字，像台灣網友轉貼時隨手打的字。${rule}
+只能根據標題和摘要，不要加入沒提到的事實或數字。不要附網址、不要寫「【新聞重點】」。`;
+  const out = await generate(env, system, prompt, 140, model);
+  if (!out || REFUSAL.test(out) || SIMPLIFIED.test(out)) { await toBack.run(); return null; }
+  const text = await reviewPost(env, model, fixTypos(out.replace(/^["「『]|["」』]$/g, '').replace(/https?:\/\/\S+/g, '').trim()), `文章標題：${item.title}\n摘要：${item.description || ''}${political ? '\n（政治新聞：內容必須中立，支持或攻擊任何候選人、政黨就回覆 NO）' : ''}`);
+  if (!text) { await toBack.run(); return null; }
+  const linkImage = await ogImage(item.url);
+  const board = boards.find((b) => b.content_group === (political ? 'news' : a.content_group)) || boards.find((b) => b.content_group === 'news') || null;
+  const id = newId();
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO posts (id, user_id, text, link_url, link_title, link_site, link_image, community_id, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'content', ?)`)
+      .bind(id, a.id, text.slice(0, 1000), item.url, item.title, siteOf(item.url, item.source), linkImage, board?.id ?? null, t),
+    env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(t, a.id),
+    ...(board ? [env.DB.prepare('UPDATE communities SET post_count = post_count + 1 WHERE id = ?').bind(board.id)] : []),
+  ]);
+  return id;
 }
 
 /** 分享一部 YouTube 影片：只根據標題講一兩句感想，不捏造影片內容 */
@@ -178,6 +214,12 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   if (a.content_group === 'news') {
     news = await takeNews(env);
     if (!news) { await toBack.run(); return null; }
+  }
+  // 分享網路文章：附一兩句自己的看法＋文章連結與縮圖（像大家在脆上轉貼新聞聊時事）
+  const shareRatio = Math.max(0, Math.min(80, Number(s.share_ratio ?? 35)));
+  if (!news && Math.random() * 100 < shareRatio) {
+    const item = await takeNews(env);
+    if (item) return postShare(env, model, a, item, boards, toBack);
   }
   // 分享影片：遊戲帳號分享遊戲影片，時事／綜合帳號分享新聞、科技、財經影片（像脆上大家轉貼影片聊時事）
   const vRatio = Math.max(0, Math.min(60, Number(s.video_ratio ?? 15)));
@@ -299,7 +341,7 @@ function commentTarget(id: string, min: number, max: number) {
   return min + Math.floor((max - min) * r * r);
 }
 
-const QUICK = ['笑死', '哈哈哈哈哈', 'XD', '+1', '真的', '我也是', '推', '太扯了吧', '同感', '樓上說的對', '好喔', '這我可以', '羨慕', '有料', '笑到不行', '確實', '我就爛', '先推再看', '這個好', '欸真的', '好真實', '不意外', '有笑有推', '這篇讚', '哈哈哈哈好可愛', '哇', '太神了', '我懂', '可以', '沒毛病'];
+const QUICK = ['真假', '超好笑', '太狂了吧', '好啦好啦', '我也想要', '可憐哪', '笑爛', '是在哈囉', '好扯', '有夠真實', '這真的', '我直接笑出來', '好喔沒問題', '推推', '這個讚', '我也遇過', '好可愛喔', '羨慕死', '這樣也行', '欸我也是', '好問題', '蛤', '天啊', '超有感', '笑死', '哈哈哈哈哈', 'XD', '+1', '真的', '我也是', '推', '太扯了吧', '同感', '樓上說的對', '好喔', '這我可以', '羨慕', '有料', '笑到不行', '確實', '我就爛', '先推再看', '這個好', '欸真的', '好真實', '不意外', '有笑有推', '這篇讚', '哈哈哈哈好可愛', '哇', '太神了', '我懂', '可以', '沒毛病'];
 const QUICK_ADULT = ['老司機開車了', '我好像懂了什麼', '這不是去幼稚園的車', '純潔的我看不懂', '你這樣大家都懂了', '車速有點快', '我什麼都沒看到'];
 const QUICK_JOKE = ['好冷', '冷到結冰', '噗', '可以，這很可以', '我笑了我輸了', '這個梗給你一百分', '笑到肚子痛'];
 
@@ -323,7 +365,7 @@ async function runCommentTick(env: Env, s: Record<string, string>) {
     const age = (now() - p.created_at) / (12 * 3600_000);
     return { p, gap: Math.floor(target * Math.min(1, Math.sqrt(Math.max(0, age)) + 0.05)) - p.comment_count };
   }).filter((x) => x.gap > 0).sort((a, b) => b.gap + Math.random() * 3 - (a.gap + Math.random() * 3)).slice(0, 12).map((x) => x.p);
-  const model = s.comment_model || '@cf/meta/llama-3.1-8b-instruct-fp8-fast';
+  const model = s.comment_model || '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
   for (const p of due) {
     const a = await env.DB.prepare(
       `SELECT id, name, handle, content_group, persona FROM users WHERE is_content = 1 AND content_enabled = 1 AND content_group = 'commenter'
@@ -334,15 +376,15 @@ async function runCommentTick(env: Env, s: Record<string, string>) {
     // 三成機率回覆底下已有的留言
     const parent = Math.random() < 0.3 ? await env.DB.prepare('SELECT id, text FROM comments WHERE post_id = ? AND parent_id IS NULL ORDER BY RANDOM() LIMIT 1').bind(p.id).first<{ id: string; text: string }>() : null;
     let text: string | null = null;
-    if (Math.random() < 0.45) {
+    if (Math.random() < 0.65) {
       text = pick(p.sensitive ? QUICK_ADULT.concat(QUICK) : /笑|梗|為什麼|因為/.test(p.text) ? QUICK_JOKE.concat(QUICK) : QUICK);
     } else {
       const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，個性：${a.persona}。`;
       const ask = parent
-        ? `貼文：${p.text.slice(0, 200)}\n有人留言：${parent.text.slice(0, 100)}\n請回覆這則留言，像網友一樣，3 到 25 個字，只寫回覆內容。`
-        : `在這篇貼文底下留言，像網友一樣自然回應，3 到 25 個字，只寫留言內容：\n${p.text.slice(0, 300)}`;
+        ? `貼文：${p.text.slice(0, 200)}\n有人留言：${parent.text.slice(0, 100)}\n請回覆這則留言，像台灣網友一樣，3 到 25 個字，只寫回覆內容。用台灣常見的口語，不要用罕見字、成語或大陸用語，句子要通順看得懂。`
+        : `在這篇貼文底下留言，像台灣網友一樣自然回應，3 到 25 個字，只寫留言內容。用台灣常見的口語，不要用罕見字、成語或大陸用語，句子要通順看得懂：\n${p.text.slice(0, 300)}`;
       const out = await generate(env, system, ask, 60, model);
-      if (out && !REFUSAL.test(out)) text = out.replace(/^["「『]|["」』]$/g, '').trim();
+      if (out && !REFUSAL.test(out) && !SIMPLIFIED.test(out)) text = toTaiwan(out.replace(/^["「『]|["」』]$/g, '').trim());
     }
     if (!text) continue;
     await addComment(env, p.id, a, text.slice(0, 120), parent?.id ?? null);

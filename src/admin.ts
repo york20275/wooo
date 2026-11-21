@@ -208,7 +208,7 @@ admin.patch('/content/:id', async (c) => {
 });
 
 const EDITABLE = ['content_enabled', 'daily_posts', 'interact_like', 'interact_comment', 'old_posts_mode',
-  'group_news', 'group_game', 'group_mixed', 'group_fun', 'paused_until', 'newsdata_key', 'rss_feeds', 'feed_content_ratio', 'ai_model', 'photo_ratio', 'pexels_key', 'pixabay_key', 'community_ratio', 'daily_poll', 'adult_ratio', 'comment_min', 'comment_max', 'comment_model', 'group_commenter', 'hot_topics', 'cf_plan', 'video_ratio'];
+  'group_news', 'group_game', 'group_mixed', 'group_fun', 'paused_until', 'newsdata_key', 'rss_feeds', 'feed_content_ratio', 'ai_model', 'photo_ratio', 'pexels_key', 'pixabay_key', 'community_ratio', 'daily_poll', 'adult_ratio', 'comment_min', 'comment_max', 'comment_model', 'group_commenter', 'hot_topics', 'cf_plan', 'video_ratio', 'share_ratio'];
 export const AI_MODELS = ['', '@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct-fp8-fast', '@cf/meta/llama-4-scout-17b-16e-instruct'];
 admin.patch('/settings', async (c) => {
   const b = await c.req.json<Record<string, any>>();
@@ -218,6 +218,7 @@ admin.patch('/settings', async (c) => {
     if (k === 'adult_ratio' && !(Number(val) >= 0 && Number(val) <= 40)) continue;
     if ((k === 'comment_min' || k === 'comment_max') && !(Number(val) >= 0 && Number(val) <= 200)) continue;
     if (k === 'comment_model' && !AI_MODELS.includes(val)) continue;
+    if (k === 'share_ratio' && !(Number(val) >= 0 && Number(val) <= 80)) continue;
     if (k === 'video_ratio' && !(Number(val) >= 0 && Number(val) <= 60)) continue;
     if (k === 'cf_plan' && !['free', 'paid'].includes(val)) continue;
     if (k === 'hot_topics') {
