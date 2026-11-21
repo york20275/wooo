@@ -2,7 +2,7 @@ import type { Env } from './env';
 import { now } from './env';
 
 /** ✦ 帳號分享影片用的 YouTube 頻道（官方頻道的公開 RSS，不需要金鑰） */
-export interface Channel { id: string; name: string; group: 'game' | 'tech' | 'news' | 'finance' }
+export interface Channel { id: string; name: string; group: 'game' | 'tech' | 'news' | 'finance' | 'ent' }
 export const DEFAULT_CHANNELS: Channel[] = [
   { id: 'UC6VcWc1rAoWdBCM0JxrRQ3A', name: 'Rockstar Games', group: 'game' },
   { id: 'UCKy1dAqELo0zrOtPkf0eTMw', name: 'IGN', group: 'game' },
@@ -14,6 +14,17 @@ export const DEFAULT_CHANNELS: Channel[] = [
   { id: 'UCexpzYDEnfmAvPSfG4xbcjA', name: '公視新聞網', group: 'news' },
   { id: 'UCWLpLjjiDrH8gkOUJmB7DSw', name: '中央社', group: 'news' },
   { id: 'UCYIVkruUoN04UjV9pkBTswg', name: '非凡電視', group: 'finance' },
+  { id: 'UC3IZKseVpdzPSBaWxBxundA', name: 'HYBE LABELS', group: 'ent' },
+  { id: 'UCLkAepWjdylmXSltofFvsYQ', name: 'BANGTANTV', group: 'ent' },
+  { id: 'UCzw-C7fNfs018R1FzIKnlaA', name: 'BIGBANG', group: 'ent' },
+  { id: 'UCeU5qTuBiqTU5z-hyL6WITQ', name: 'OfficialGDRAGON', group: 'ent' },
+  { id: 'UCOmHUn--16B90oW2L6FRR3A', name: 'BLACKPINK', group: 'ent' },
+  { id: 'UCEf_Bc-KVd7onSeifS3py9g', name: 'SMTOWN', group: 'ent' },
+  { id: 'UCaO6TYtlC8U5ttz62hTrZgg', name: 'JYP Entertainment', group: 'ent' },
+  { id: 'UCbD8EppRX3ZwJSou-TVo90A', name: 'Mnet K-POP', group: 'ent' },
+  { id: 'UCX157UE-NdaUGQJDkQ-XKnw', name: 'ETtoday星光雲', group: 'ent' },
+  { id: 'UCmyVDKnXwdw3McUlcijqmvQ', name: '東森娛樂', group: 'ent' },
+  { id: 'UCRXiA3h1no_PFkb1JCP0yMA', name: 'Vogue', group: 'ent' },
 ];
 
 export interface Video { id: string; title: string; channel: string; grp: string }

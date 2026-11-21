@@ -47,7 +47,7 @@ function chooseBoard(boards: Board[], a: Account, isNews: boolean): Board | null
 }
 
 type Style = 'banter' | 'joke' | 'adult' | 'normal' | 'topic' | 'ask' | 'observe';
-interface HotTopic { name: string; facts: string; ratio: number; groups?: string[]; board?: 'game' | 'news'; keyword?: string }
+interface HotTopic { name: string; facts: string; ratio: number; groups?: string[]; board?: 'game' | 'news' | 'ent'; keyword?: string }
 
 export function hotTopics(s: Record<string, string>): HotTopic[] {
   try { const t = JSON.parse(s.hot_topics || '[]'); return Array.isArray(t) ? t.filter((x) => x && x.name) : []; } catch { return []; }
@@ -156,6 +156,7 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
   return pick(style === 'banter' ? ['好想下班', '今天也是廢廢的一天', '肚子餓到可以吃下一頭牛'] : style === 'joke' ? ['為什麼海很鹹？因為魚在裡面流汗。'] : [`${twNow()}，又是想窩著什麼都不做的時刻。大家現在在做什麼？`]);
 }
 
+const ENT = /BTS|防彈|BIGBANG|G-DRAGON|GD|BLACKPINK|IVE|aespa|NewJeans|K-?POP|韓團|偶像|演唱會|明星|歌手|藝人|影后|影帝|金曲|金馬|時尚|走秀|粉絲見面會|專輯|MV/i;
 const POLITICAL = /選舉|選戰|候選人|參選|市長|縣長|議員|立委|立法院|總統|政見|政黨|國民黨|民進黨|民眾黨|時代力量|藍營|綠營|白營|罷免|公投|投票日|拜票|造勢|辯論會/;
 
 /** 讀網頁的標題、摘要（og:title / og:description） */
@@ -209,7 +210,8 @@ async function postShare(env: Env, model: string, a: Account, item: NewsItem, bo
   const text = await reviewPost(env, model, fixTypos(out.replace(/^["「『]|["」』]$/g, '').replace(/https?:\/\/\S+/g, '').trim()), `文章標題：${item.title}\n摘要：${item.description || ''}${political ? '\n（政治新聞：內容必須中立，支持或攻擊任何候選人、政黨就回覆 NO）' : ''}`);
   if (!text) { await toBack.run(); return null; }
   const linkImage = await ogImage(item.url);
-  const board = (political ? boards.find((b) => b.name === '政治議題') : null) || boards.find((b) => b.content_group === (political ? 'news' : a.content_group)) || boards.find((b) => b.content_group === 'news') || null;
+  const ent = ENT.test(item.title + (item.description || ''));
+  const board = (political ? boards.find((b) => b.name === '政治議題') : ent ? boards.find((b) => b.name === '追星娛樂') : null) || boards.find((b) => b.content_group === (political ? 'news' : a.content_group)) || boards.find((b) => b.content_group === 'news') || null;
   const id = newId();
   const t = now();
   await env.DB.batch([
@@ -231,7 +233,7 @@ async function postVideo(env: Env, model: string, a: Account, v: Video, boards: 
   if (!out || REFUSAL.test(out)) { await toBack.run(); return null; }
   const text = await reviewPost(env, model, fixTypos(out.replace(/^["「『]|["」』]$/g, '').replace(/https?:\/\/\S+/g, '').trim()));
   if (!text) { await toBack.run(); return null; }
-  const board = (v.grp === 'game' ? boards.find((b) => b.content_group === 'game') : boards.find((b) => b.content_group === 'news')) || null;
+  const board = (v.grp === 'game' ? boards.find((b) => b.content_group === 'game') : v.grp === 'ent' ? boards.find((b) => b.name === '追星娛樂') : boards.find((b) => b.content_group === 'news')) || null;
   const id = newId();
   const t = now();
   await env.DB.batch([
@@ -260,9 +262,9 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   }
   // 分享影片：遊戲帳號分享遊戲影片，時事／綜合帳號分享新聞、科技、財經影片（像脆上大家轉貼影片聊時事）
   const vRatio = Math.max(0, Math.min(60, Number(s.video_ratio ?? 15)));
-  if (!news && a.content_group !== 'fun' && Math.random() * 100 < vRatio) {
-    const groups = a.content_group === 'game' ? ['game'] : a.content_group === 'mixed' ? ['game', 'tech', 'news', 'finance'] : ['news', 'tech', 'finance'];
-    const kws = ['GTA', '俠盜', '黃仁勳', 'Jensen', 'NVIDIA', '輝達', '台股', '股市', '台積電', ...hotTopics(s).map((t) => t.name)];
+  if (!news && Math.random() * 100 < vRatio) {
+    const groups = a.content_group === 'game' ? ['game'] : a.content_group === 'fun' ? ['ent'] : a.content_group === 'mixed' ? ['game', 'tech', 'news', 'finance', 'ent'] : ['news', 'tech', 'finance'];
+    const kws = ['GTA', '俠盜', '黃仁勳', 'Jensen', 'NVIDIA', '輝達', '台股', '股市', '台積電', 'BTS', '防彈', 'G-DRAGON', 'GD', 'BIGBANG', 'BLACKPINK', ...hotTopics(s).map((t) => t.name)];
     const v = await takeVideo(env, groups, kws);
     if (v) return postVideo(env, model, a, v, boards, toBack);
   }
@@ -270,7 +272,7 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   let board = chooseBoard(boards, a, !!news);
   let headlines: string[] = [];
   if (style === 'topic' && topic) {
-    board = (topic.board === 'news' ? boards.find((b) => b.content_group === 'news') : boards.find((b) => b.content_group === 'game')) || board;
+    board = (topic.board === 'news' ? boards.find((b) => b.content_group === 'news') : topic.board === 'ent' ? boards.find((b) => b.name === '追星娛樂') : boards.find((b) => b.content_group === 'game')) || board;
     const kw = (topic.keyword || topic.name).replace(/\s+/g, '').slice(0, 10);
     const r = await env.DB.prepare("SELECT title FROM news_cache WHERE replace(title, ' ', '') LIKE ? ORDER BY fetched_at DESC LIMIT 6").bind(`%${kw}%`).all<{ title: string }>();
     headlines = r.results.map((x) => x.title);
