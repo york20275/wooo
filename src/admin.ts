@@ -10,7 +10,7 @@ import { runIssuePoll } from './features';
 import { fetchVideos } from './videos';
 import { HttpError, deletePost } from './api';
 import { deleteUserData } from './social';
-import { runPostTick, fetchNews, dailyPosts, seedCommenters, shareUrl, pageMeta } from './content';
+import { runPostTick, fetchNews, dailyPosts, seedCommenters, shareUrl, pageMeta, purgeGenericComments } from './content';
 
 export const admin = new Hono<AppEnv>();
 
@@ -350,6 +350,8 @@ admin.get('/image-test', async (c) => {
 admin.post('/content/avatars-now', async (c) => c.json({ done: await assignAvatars(c.env, 5) }));
 
 admin.post('/migrate', async (c) => c.json({ applied: await migrate(c.env) }));
+
+admin.post('/content/purge-generic-comments', async (c) => { const r = await purgeGenericComments(c.env); await logAudit(c.env.DB, c.get('user')!.id, 'purge_comments', null, JSON.stringify(r)); return c.json(r); });
 
 admin.post('/content/share-url', async (c) => {
   const b = await c.req.json<any>().catch(() => ({}));

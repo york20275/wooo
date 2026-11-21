@@ -443,6 +443,26 @@ async function runCommentTick(env: Env, s: Record<string, string>) {
   }
 }
 
+/** 清掉 ✦ 帳號的空泛留言（罐頭短句、6 個字以內、像業配的話），連同底下的回覆，並重算留言數 */
+export async function purgeGenericComments(env: Env) {
+  const canned = [...QUICK, ...QUICK_ADULT, ...QUICK_JOKE];
+  const rows = (await env.DB.prepare(`SELECT c.id, c.post_id, c.text FROM comments c JOIN users u ON u.id = c.user_id WHERE u.is_content = 1`).all<{ id: string; post_id: string; text: string }>()).results;
+  const bad = rows.filter((r) => { const t = r.text.trim(); return canned.includes(t) || [...t.replace(/[\s!！?？~～。，,.]/g, '')].length <= 6 || /大家一定要看|一定要看|我看過了|可以分享一下嗎|有夠搞笑吧|笑死我了/.test(t); });
+  const ids = bad.map((b) => b.id);
+  const posts = new Set(bad.map((b) => b.post_id));
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50);
+    const ph = chunk.map(() => '?').join(',');
+    await env.DB.prepare(`DELETE FROM comments WHERE id IN (${ph}) OR parent_id IN (${ph})`).bind(...chunk, ...chunk).run();
+  }
+  const pl = [...posts];
+  for (let i = 0; i < pl.length; i += 50) {
+    const chunk = pl.slice(i, i + 50);
+    await env.DB.batch(chunk.map((id) => env.DB.prepare('UPDATE posts SET comment_count = (SELECT COUNT(*) FROM comments WHERE post_id = ?) WHERE id = ?').bind(id, id)));
+  }
+  return { deleted: ids.length, posts: pl.length, total_ai_comments: rows.length };
+}
+
 /** 一次建立 200 個留言專用帳號（已經有的會略過） */
 export async function seedCommenters(env: Env) {
   const { COMMENTERS } = await import('./commenter-seed');
