@@ -195,6 +195,19 @@ async function takePolitical(env: Env): Promise<NewsItem | null> {
   return r.meta.changes ? it : null;
 }
 
+/** 轉貼文共用格式：第一行是標題（中文），接一兩句看法，最後 2～4 個 #標籤（方便站內外搜尋） */
+const SHARE_FORMAT = `只輸出下面三行，不要加其他文字：
+標題：（中文標題；原標題是中文就照抄，英文就翻成自然的中文，遊戲、人名等專有名詞可保留英文）
+看法：（1 到 2 句、10 到 50 個字，像台灣網友轉貼時隨手打的感想或問大家）
+標籤：（2 到 4 個 #標籤，用空格分開，例如 #GTA6 #攻略 或 #BTS #防彈少年團，標籤裡不要有空格）`;
+function parseShare(out: string, fallbackTitle: string) {
+  const get = (k: string) => (out.match(new RegExp(`${k}[:：]\\s*(.+)`)) || [])[1]?.trim() || '';
+  const title = get('標題').replace(/^[「『"]|[」』"]$/g, '') || fallbackTitle;
+  const say = get('看法').replace(/^[「『"]|[」』"]$/g, '').replace(/https?:\/\/\S+/g, '');
+  const tags = (get('標籤').match(/#[^\s#，,。]{1,20}/g) || []).slice(0, 4);
+  return { title: title.slice(0, 120), say, tags };
+}
+
 /** 分享一篇網路文章：只根據標題與摘要講一兩句看法，附原文連結（不複製文章內容） */
 async function postShare(env: Env, model: string, a: Account, item: NewsItem, boards: Board[], toBack: D1PreparedStatement): Promise<string | null> {
   const political = POLITICAL.test(item.title + (item.description || ''));
@@ -203,12 +216,15 @@ async function postShare(env: Env, model: string, a: Account, item: NewsItem, bo
     ? '這是選舉／政治相關的新聞。保持中立：可以點出新聞重點、問大家怎麼看或關心哪些議題，絕對不能支持或反對任何候選人、政黨，不能叫人投給誰或不要投給誰，也不能嘲諷任何一方。'
     : '可以是感想、吐槽、驚訝或問大家怎麼看。';
   const prompt = `你要在社群轉貼一篇文章，附上一兩句話。文章標題：「${item.title}」\n摘要：${(item.description || '（無）').slice(0, 300)}
-用 1 到 2 句話、10 到 60 個字，像台灣網友轉貼時隨手打的字。${rule}
-只能根據標題和摘要，不要加入沒提到的事實或數字。不要附網址、不要寫「【新聞重點】」。`;
-  const out = await generate(env, system, prompt, 140, model);
+看法的部分：${rule}只能根據標題和摘要，不要加入沒提到的事實或數字。
+${SHARE_FORMAT}`;
+  const out = await generate(env, system, prompt, 200, model);
   if (!out || REFUSAL.test(out) || SIMPLIFIED.test(out)) { await toBack.run(); return null; }
-  const text = await reviewPost(env, model, fixTypos(out.replace(/^["「『]|["」』]$/g, '').replace(/https?:\/\/\S+/g, '').trim()), `文章標題：${item.title}\n摘要：${item.description || ''}${political ? '\n（政治新聞：內容必須中立，支持或攻擊任何候選人、政黨就回覆 NO）' : ''}`);
-  if (!text) { await toBack.run(); return null; }
+  const ps = parseShare(out, item.title);
+  if (!ps.say) { await toBack.run(); return null; }
+  const say = await reviewPost(env, model, fixTypos(ps.say), `文章標題：${item.title}\n摘要：${item.description || ''}${political ? '\n（政治新聞：內容必須中立，支持或攻擊任何候選人、政黨就回覆 NO）' : ''}`);
+  if (!say) { await toBack.run(); return null; }
+  const text = `${fixTypos(ps.title)}\n${say}${ps.tags.length ? `\n${ps.tags.join(' ')}` : ''}`;
   const linkImage = await ogImage(item.url);
   const ent = ENT.test(item.title + (item.description || ''));
   const board = (political ? boards.find((b) => b.name === '政治議題') : ent ? boards.find((b) => b.name === '追星娛樂') : null) || boards.find((b) => b.content_group === (political ? 'news' : a.content_group)) || boards.find((b) => b.content_group === 'news') || null;
@@ -228,12 +244,16 @@ async function postVideo(env: Env, model: string, a: Account, v: Video, boards: 
   const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。`;
   const english = !/[\u4e00-\u9fff]/.test(v.title);
   const prompt = `你要在社群分享一部 YouTube 影片。影片標題：「${v.title}」（頻道：${v.channel}）。
-${english ? '標題是英文：先用一句中文說明這是什麼影片（例如「國外大神整理的 GTA6 新手必學技巧」），再加一句自己的看法或問大家，總共 20 到 70 個字。遊戲專有名詞可以保留英文。' : '用 1 到 2 句話、10 到 50 個字寫分享時的感想或問大家的看法，像真人轉貼影片時隨手打的字。'}
+${english ? '標題是英文，請翻成自然的中文標題（例如「國外大神整理的 GTA6 新手必學技巧」）。' : ''}
+${SHARE_FORMAT}
 只能根據標題講，不要假裝看過影片細節、不要捏造數字或內容；如果跟股票有關，不要給買賣建議。不要附網址。`;
-  const out = await generate(env, system, prompt, 120, model);
-  if (!out || REFUSAL.test(out)) { await toBack.run(); return null; }
-  const text = await reviewPost(env, model, fixTypos(out.replace(/^["「『]|["」』]$/g, '').replace(/https?:\/\/\S+/g, '').trim()));
-  if (!text) { await toBack.run(); return null; }
+  const out = await generate(env, system, prompt, 200, model);
+  if (!out || REFUSAL.test(out) || SIMPLIFIED.test(out)) { await toBack.run(); return null; }
+  const ps = parseShare(out, v.title);
+  if (!ps.say) { await toBack.run(); return null; }
+  const say = await reviewPost(env, model, fixTypos(ps.say), `影片標題：${v.title}`);
+  if (!say) { await toBack.run(); return null; }
+  const text = `${fixTypos(ps.title)}\n${say}${ps.tags.length ? `\n${ps.tags.join(' ')}` : ''}`;
   const board = (v.grp === 'game' ? boards.find((b) => b.content_group === 'game') : v.grp === 'ent' ? boards.find((b) => b.name === '追星娛樂') : boards.find((b) => b.content_group === 'news')) || null;
   const id = newId();
   const t = now();

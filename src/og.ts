@@ -48,8 +48,15 @@ async function metaFor(env: Env, path: string): Promise<Meta | null> {
     };
   }
   if ((m = path.match(/^\/tag\/(.+)$/))) {
-    const tag = decodeURIComponent(m[1]).slice(0, 20);
-    return { title: `#${tag}｜窩Woo！`, description: `窩Woo！上關於 #${tag} 的文章`, image: null };
+    const tag = decodeURIComponent(m[1]).replace(/[%_]/g, '').slice(0, 20);
+    const posts = await env.DB.prepare("SELECT p.text, p.link_title, u.name FROM posts p JOIN users u ON u.id = p.user_id WHERE p.text LIKE ? AND p.hidden = 0 AND p.sensitive = 0 AND u.status != 'banned' ORDER BY p.created_at DESC LIMIT 20").bind(`%#${tag}%`).all<any>();
+    const first = posts.results[0];
+    return {
+      title: `#${tag} 最新討論、影片與心得｜窩Woo！`,
+      description: clip(`窩Woo！上關於 #${tag} 的最新文章、影片和網友討論。${first ? (first.link_title || first.text || '').split('\n')[0] : ''}`, 150),
+      image: null,
+      body: `<h1>#${esc(tag)}</h1><ul>${posts.results.map((x: any) => `<li>${esc(x.name)}：${esc(clip((x.text || '').replace(/\n/g, ' '), 140))}${x.link_title ? `（${esc(clip(x.link_title, 80))}）` : ''}</li>`).join('')}</ul>`,
+    };
   }
   return null;
 }
@@ -105,6 +112,11 @@ export async function sitemap(env: Env, origin: string) {
     "SELECT p.id, p.created_at FROM posts p JOIN users u ON u.id = p.user_id WHERE p.hidden = 0 AND p.sensitive = 0 AND p.kind != 'repost' AND u.status = 'active' ORDER BY p.created_at DESC LIMIT 2000"
   ).all<any>();
   for (const p of posts.results) urls.push({ loc: `/p/${p.id}`, lastmod: day(p.created_at), freq: 'weekly', pri: '0.6' });
+  // 熱門 #標籤頁（最近 7 天出現最多次的前 100 個）
+  const recent = await env.DB.prepare("SELECT text FROM posts WHERE created_at > ? AND hidden = 0 AND sensitive = 0 AND text LIKE '%#%'").bind(Date.now() - 7 * 86400_000).all<any>();
+  const count = new Map<string, number>();
+  for (const r of recent.results) for (const t of new Set<string>((r.text || '').match(/#[^\s#，,。！!？?]{1,20}/gu) || [])) count.set(t.slice(1), (count.get(t.slice(1)) || 0) + 1);
+  for (const [t] of [...count.entries()].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).slice(0, 100)) urls.push({ loc: `/tag/${encodeURIComponent(t)}`, freq: 'daily', pri: '0.5' });
   const users = await env.DB.prepare("SELECT handle FROM users WHERE status = 'active' AND is_content = 0 ORDER BY last_seen_at DESC LIMIT 500").all<any>();
   for (const u of users.results) urls.push({ loc: `/u/${u.handle}`, freq: 'daily', pri: '0.4' });
   const x = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
