@@ -147,7 +147,8 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   }
   if (style === 'adult') board = boards.find((b) => b.id === 'cm_free') || board;
   // 笑話、幹話也配圖（梗圖感的相關照片）；成人梗不配圖
-  const wantPhoto = !news && style !== 'adult' && Math.random() * 100 < (style === 'joke' || style === 'banter' ? Math.max(photoRatio, 50) : photoRatio);
+  // 大約 7 成的文附 1～2 張照片（成人梗不配圖，所以其他類型的比例再拉高一點補回來）
+  const wantPhoto = style !== 'adult' && Math.random() * 100 < Math.min(100, photoRatio * 1.12);
   const raw = await writePost(env, model, a, news, wantPhoto, board, style, topic, headlines);
   if (!raw) {
     await toBack.run();
@@ -157,13 +158,17 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   const { text, query } = splitPhotoLine(raw);
   if (!text) { await toBack.run(); return null; }
   // 照片找不到就只發文字，不影響發文
-  const photoQuery = query || (style === 'topic' ? 'video game controller' : topicQuery(`${board?.name || ''}${board?.description || ''}${a.persona}`));
+  const photoQuery = query || (news ? topicQuery(`${news.title}${news.description || ''}`) : style === 'topic' ? 'video game controller' : topicQuery(`${board?.name || ''}${board?.description || ''}${a.persona}`));
   const photo = wantPhoto ? await findPhoto(env, photoQuery).catch(() => null) : null;
+  // 約 4 成再加第二張
+  const photo2 = photo && Math.random() < 0.4 ? await findPhoto(env, photoQuery, undefined, [photo.creditUrl]).catch(() => null) : null;
+  const images = photo ? JSON.stringify([photo.key, ...(photo2 ? [photo2.key] : [])]) : null;
+  const credit = photo ? (photo2 && photo2.credit !== photo.credit ? `${photo.credit}、${photo2.credit}` : photo.credit) : null;
   const id = newId();
   const t = now();
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO posts (id, user_id, text, image_key, image_credit, image_credit_url, link_url, link_title, link_site, community_id, sensitive, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'content', ?)`)
-      .bind(id, a.id, text.slice(0, 1000), photo?.key ?? null, photo?.credit ?? null, photo?.creditUrl ?? null, news?.url ?? null, news?.title ?? null, news ? siteOf(news.url, news.source) : null, board?.id ?? null, style === 'adult' ? 1 : 0, t),
+    env.DB.prepare(`INSERT INTO posts (id, user_id, text, image_key, images, image_credit, image_credit_url, link_url, link_title, link_site, community_id, sensitive, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'content', ?)`)
+      .bind(id, a.id, text.slice(0, 1000), photo?.key ?? null, images, credit ? credit.slice(0, 160) : null, photo?.creditUrl ?? null, news?.url ?? null, news?.title ?? null, news ? siteOf(news.url, news.source) : null, board?.id ?? null, style === 'adult' ? 1 : 0, t),
     env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(t, a.id),
     ...(board ? [env.DB.prepare('UPDATE communities SET post_count = post_count + 1 WHERE id = ?').bind(board.id)] : []),
   ]);

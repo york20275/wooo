@@ -71,11 +71,12 @@ export async function candidates(env: Env, query: string, debug?: string[]): Pro
     }));
 }
 
-export async function findPhoto(env: Env, query: string, debug?: string[]): Promise<Photo | null> {
+export async function findPhoto(env: Env, query: string, debug?: string[], exclude: string[] = []): Promise<Photo | null> {
   const list = (await candidates(env, query, debug)).sort(() => Math.random() - 0.5);
   debug?.push(`候選 ${list.length} 張`);
   for (const p of list.slice(0, 6)) {
     // 同一張照片不重複使用
+    if (exclude.includes(p.page)) continue;
     const used = await env.DB.prepare('SELECT 1 FROM posts WHERE image_credit_url = ? LIMIT 1').bind(p.page).first();
     if (used) continue;
     let img = await fetch(p.image, { headers: { 'User-Agent': 'WooBot/1.0 (+https://wootw.com)' } }).catch(() => null);
