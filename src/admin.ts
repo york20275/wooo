@@ -323,7 +323,9 @@ admin.get('/text-test', async (c) => {
   const model = c.req.query('m') || '@cf/llava-hf/llava-1.5-7b-hf';
   const q = 'Is there any visible text, letters, characters, numbers, logo or watermark anywhere in this image, even small or blurry? Answer only yes or no.';
   try {
-    const input: any = model.includes('llama-3.2') ? { messages: [{ role: 'user', content: q }], image: [...bin], max_tokens: 5 } : { image: [...bin], prompt: q, max_tokens: 5 };
+    let b64 = ''; for (let i = 0; i < bin.length; i += 0x8000) b64 += String.fromCharCode(...bin.subarray(i, i + 0x8000));
+    const url = `data:image/jpeg;base64,${btoa(b64)}`;
+    const input: any = /llama-4|gemma-3|mistral-small/.test(model) ? { messages: [{ role: 'user', content: [{ type: 'text', text: q }, { type: 'image_url', image_url: { url } }] }], max_tokens: 5 } : model.includes('llama-3.2') ? { messages: [{ role: 'user', content: q }], image: [...bin], max_tokens: 5 } : { image: [...bin], prompt: q, max_tokens: 5 };
     return c.json({ model, r: await c.env.AI.run(model as any, input) });
   } catch (e) { return c.json({ model, err: String(e) }); }
 });
