@@ -75,12 +75,12 @@ const TYPOS: [RegExp, string][] = [[/倒楉|倒霉/g, '倒楣'], [/重來沒/g, 
 function fixTypos(t: string) { return TYPOS.reduce((s, [re, to]) => s.replace(re, to), t); }
 
 /** 發文前再檢查一次：不合常理就不發；合理就只修錯字。短文（幹話）不檢查以節省用量 */
-async function reviewPost(env: Env, model: string, text: string): Promise<string | null> {
+async function reviewPost(env: Env, model: string, text: string, facts = ''): Promise<string | null> {
   if ([...text].length <= 6) return text;
   const out = await generate(env, '你是台灣社群網站的文字編輯，用繁體中文，只輸出結果，不要解釋。', `檢查下面這則貼文：
 1. 是否符合台灣生活常識（例如捷運上不能吃東西、機車要戴安全帽）與現在的時間（${twNow()}；下午不會說早安）。
 2. 是否通順、看得懂、有意思（語無倫次、重複繞口、看不懂在講什麼都算不合格）；情節是否合乎常理（例如：吃漢堡本來就用手，不會需要叉子或筷子；不會有像犯罪或被困住的情節；前後不能矛盾）。
-3. 有沒有錯字或不自然的用詞。
+3. 有沒有錯字或不自然的用詞。${facts ? `\n4. 內容不能跟下面的已知事實矛盾，也不能出現已知事實裡沒有的具體名稱、地名、數字（矛盾或捏造就回覆 NO）：\n${facts}` : ''}
 如果不合格或情節不合理，只回覆「NO」。
 如果合理，回覆修正錯字後的全文（只修錯字和不通順的地方，不要改內容、不要加字、不要加引號）。
 
@@ -140,7 +140,7 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
   if (out && !REFUSAL.test(out)) {
     const lines = out.replace(/^["「『]|["」』]$/g, '').trim().split('\n');
     const photoLine = /^PHOTO\s*[:：]/i.test(lines[lines.length - 1] || '') ? lines.pop()! : '';
-    const checked = await reviewPost(env, model, fixTypos(lines.join('\n').trim()));
+    const checked = await reviewPost(env, model, fixTypos(lines.join('\n').trim()), style === 'topic' ? topic?.facts || '' : '');
     if (!checked) return null;
     return photoLine ? `${checked}\n${photoLine}` : checked;
   }
