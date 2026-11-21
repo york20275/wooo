@@ -384,3 +384,15 @@ h1.blogtitle { font-size: 26px; }
 .spark i { flex: 1; background: var(--primary); opacity: .75; border-radius: 3px 3px 0 0; min-width: 4px; }
 .groups.four { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 @media (max-width: 1200px) { .groups.four { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* 分類版方格：自動排，越寬排越多格，手機至少 3 格一列 */
+.cgrid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.ccard.sq { padding: 10px; gap: 4px; }
+.ccard.sq .ic, .ccard.sq img { width: 36px; height: 36px; font-size: 20px; }
+.ccard.sq b, .ccard.sq h3 { font-size: 14px; }
+@media (max-width: 640px) {
+  .cgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .ccard.sq { padding: 8px; }
+  .ccard.sq .desc { display: none; }
+  .ccard.sq b, .ccard.sq h3 { font-size: 13px; }
+  .ccard.sq small { font-size: 11px; }
+}
