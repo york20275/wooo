@@ -75,11 +75,11 @@ function fixTypos(t: string) { return TYPOS.reduce((s, [re, to]) => s.replace(re
 
 /** 發文前再檢查一次：不合常理就不發；合理就只修錯字。短文（幹話）不檢查以節省用量 */
 async function reviewPost(env: Env, model: string, text: string): Promise<string | null> {
-  if ([...text].length <= 30) return text;
+  if ([...text].length <= 6) return text;
   const out = await generate(env, '你是台灣社群網站的文字編輯，用繁體中文，只輸出結果，不要解釋。', `檢查下面這則貼文：
-1. 情節是否合乎常理（例如：吃漢堡本來就用手，不會需要叉子或筷子；不會有像犯罪或被困住的情節；前後不能矛盾）。
+1. 是否通順、看得懂、有意思（語無倫次、重複繞口、看不懂在講什麼都算不合格）；情節是否合乎常理（例如：吃漢堡本來就用手，不會需要叉子或筷子；不會有像犯罪或被困住的情節；前後不能矛盾）。
 2. 有沒有錯字或不自然的用詞。
-如果情節不合理，只回覆「NO」。
+如果不合格或情節不合理，只回覆「NO」。
 如果合理，回覆修正錯字後的全文（只修錯字和不通順的地方，不要改內容、不要加字、不要加引號）。
 
 貼文：
