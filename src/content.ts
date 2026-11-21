@@ -158,6 +158,15 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
 
 const POLITICAL = /選舉|選戰|候選人|參選|市長|縣長|議員|立委|立法院|總統|政見|政黨|國民黨|民進黨|民眾黨|時代力量|藍營|綠營|白營|罷免|公投|投票日|拜票|造勢|辯論會/;
 
+async function takePolitical(env: Env): Promise<NewsItem | null> {
+  const rows = (await env.DB.prepare('SELECT url, title, source, description FROM news_cache WHERE used = 0 AND fetched_at > ? ORDER BY fetched_at DESC LIMIT 60').bind(now() - 36 * 3600_000).all<NewsItem>()).results;
+  const pol = rows.filter((x) => POLITICAL.test(x.title + (x.description || '')));
+  if (!pol.length) return null;
+  const it = pol[Math.floor(Math.random() * Math.min(pol.length, 10))];
+  const r = await env.DB.prepare('UPDATE news_cache SET used = 1 WHERE url = ? AND used = 0').bind(it.url).run();
+  return r.meta.changes ? it : null;
+}
+
 /** 分享一篇網路文章：只根據標題與摘要講一兩句看法，附原文連結（不複製文章內容） */
 async function postShare(env: Env, model: string, a: Account, item: NewsItem, boards: Board[], toBack: D1PreparedStatement): Promise<string | null> {
   const political = POLITICAL.test(item.title + (item.description || ''));
@@ -173,7 +182,7 @@ async function postShare(env: Env, model: string, a: Account, item: NewsItem, bo
   const text = await reviewPost(env, model, fixTypos(out.replace(/^["「『]|["」』]$/g, '').replace(/https?:\/\/\S+/g, '').trim()), `文章標題：${item.title}\n摘要：${item.description || ''}${political ? '\n（政治新聞：內容必須中立，支持或攻擊任何候選人、政黨就回覆 NO）' : ''}`);
   if (!text) { await toBack.run(); return null; }
   const linkImage = await ogImage(item.url);
-  const board = boards.find((b) => b.content_group === (political ? 'news' : a.content_group)) || boards.find((b) => b.content_group === 'news') || null;
+  const board = (political ? boards.find((b) => b.name === '政治議題') : null) || boards.find((b) => b.content_group === (political ? 'news' : a.content_group)) || boards.find((b) => b.content_group === 'news') || null;
   const id = newId();
   const t = now();
   await env.DB.batch([
@@ -218,7 +227,8 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   // 分享網路文章：附一兩句自己的看法＋文章連結與縮圖（像大家在脆上轉貼新聞聊時事）
   const shareRatio = Math.max(0, Math.min(80, Number(s.share_ratio ?? 35)));
   if (!news && Math.random() * 100 < shareRatio) {
-    const item = await takeNews(env);
+    // 約三成優先挑選舉／政治新聞（各家新聞都會輪到，內容保持中立），讓政治議題版有話題
+    const item = (Math.random() < 0.3 ? await takePolitical(env) : null) || await takeNews(env);
     if (item) return postShare(env, model, a, item, boards, toBack);
   }
   // 分享影片：遊戲帳號分享遊戲影片，時事／綜合帳號分享新聞、科技、財經影片（像脆上大家轉貼影片聊時事）
