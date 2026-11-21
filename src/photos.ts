@@ -151,7 +151,7 @@ export async function aiImage(env: Env, prompt: string, folder = 'c', square = f
       .replace(/\bgame controller\b/gi, 'gamepad').replace(TEXTY, '').replace(/\s+/g, ' ').replace(/(,\s*)+/g, ', ').trim();
     const full = `${clean}, ${square ? 'cute avatar picture, centered subject, soft plain background' : 'realistic amateur photo, natural lighting, everyday scene, plain solid-colored objects, clean simple background, empty scene without anyone'}`;
     for (let i = 0; i < 2; i++) {
-      const out = (await env.AI.run(IMAGE_MODEL as any, { prompt: full.slice(0, 2000), steps: 4, seed: Math.floor(Math.random() * 1e9) })) as any;
+      const out = (await env.AI.run(IMAGE_MODEL as any, { prompt: full.slice(0, 2000), steps: 4 })) as any;
       if (!out?.image) { debug?.push('沒有圖'); continue; }
       const bin = Uint8Array.from(atob(out.image), (ch) => ch.charCodeAt(0));
       if (bin.byteLength < 3000) continue;
