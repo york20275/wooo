@@ -56,7 +56,7 @@ export async function candidates(env: Env, query: string, debug?: string[]): Pro
       if (list.length) return list;
     } else console.log('pixabay', r.status);
   }
-  const r = await fetch(`https://api.openverse.org/v1/images/?q=${encodeURIComponent(query)}&license=cc0,pdm,by&mature=false&aspect_ratio=wide&page_size=30`, {
+  const r = await fetch(`https://api.openverse.org/v1/images/?q=${encodeURIComponent(query)}&license=cc0,pdm,by&mature=false&aspect_ratio=wide&page_size=20`, {
     headers: { 'User-Agent': 'WooBot/1.0 (+https://wootw.com)' },
   });
   if (!r.ok) { console.log('openverse', r.status); debug?.push(`openverse HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`); return []; }
@@ -91,4 +91,54 @@ export async function findPhoto(env: Env, query: string, debug?: string[]): Prom
     return { key: k, credit: p.credit.slice(0, 80), creditUrl: p.page };
   }
   return null;
+}
+
+// ======================= ✦ 帳號頭像 =======================
+const CARTOON = ['lorelei', 'notionists', 'open-peeps', 'pixel-art', 'thumbs']; // DiceBear 的 CC0 授權風格（卡通人物）
+const ANIMALS = ['cat', 'kitten', 'dog', 'puppy', 'shiba inu', 'corgi', 'rabbit', 'hamster', 'parrot', 'owl', 'fox', 'red panda', 'penguin', 'turtle', 'hedgehog', 'alpaca', 'duck', 'squirrel'];
+const SCENES = ['mountain landscape', 'sea sunset', 'forest', 'city night', 'flowers', 'coffee', 'blue sky clouds', 'beach', 'autumn leaves', 'snow mountain', 'lake', 'sunrise', 'cherry blossom', 'starry sky', 'waterfall'];
+const pickOne = <T>(a: T[]) => a[Math.floor(Math.random() * a.length)];
+
+async function grab(url: string): Promise<{ buf: ArrayBuffer; type: string } | null> {
+  const r = await fetch(url, { headers: { 'User-Agent': 'WooBot/1.0 (+https://wootw.com)' } }).catch(() => null);
+  const type = r?.headers.get('content-type') || '';
+  if (!r || !r.ok || !type.startsWith('image/') || type.includes('svg')) return null;
+  const buf = await r.arrayBuffer();
+  return buf.byteLength > 5000 && buf.byteLength < 3 * 1024 * 1024 ? { buf, type } : null;
+}
+
+/** 動物或風景照（只用 CC0／公眾領域，頭像上不必標示作者） */
+async function openverseSquare(query: string) {
+  const r = await fetch(`https://api.openverse.org/v1/images/?q=${encodeURIComponent(query)}&license=cc0,pdm&mature=false&aspect_ratio=square&page_size=20`, {
+    headers: { 'User-Agent': 'WooBot/1.0 (+https://wootw.com)' },
+  }).catch(() => null);
+  if (!r || !r.ok) return null;
+  const d = (await r.json()) as any;
+  const list = (d.results || []).filter((x: any) => x.url).sort(() => Math.random() - 0.5);
+  for (const x of list.slice(0, 3)) {
+    const img = await grab(x.thumbnail || x.url);
+    if (img) return img;
+  }
+  return null;
+}
+
+/** 每次幫幾個還沒有頭像的 ✦ 帳號配頭像：約 3 成動物、2 成風景、5 成卡通人物（不使用真人照片） */
+export async function assignAvatars(env: Env, n: number) {
+  const r = await env.DB.prepare('SELECT id, handle FROM users WHERE is_content = 1 AND avatar_key IS NULL ORDER BY RANDOM() LIMIT ?').bind(n).all<{ id: string; handle: string }>();
+  let done = 0;
+  for (const u of r.results) {
+    const roll = Math.random();
+    let img = roll < 0.3 ? await openverseSquare(pickOne(ANIMALS)) : roll < 0.5 ? await openverseSquare(pickOne(SCENES)) : null;
+    if (!img) {
+      const style = pickOne(CARTOON);
+      img = await grab(`https://api.dicebear.com/9.x/${style}/png?seed=${encodeURIComponent(u.handle)}&size=256&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf,c7f0d8`);
+    }
+    if (!img) continue;
+    const ext = img.type.includes('png') ? 'png' : img.type.includes('webp') ? 'webp' : 'jpg';
+    const key = `avatars/c/${u.id}-${newId().slice(0, 6)}.${ext}`;
+    await env.IMAGES.put(key, img.buf, { httpMetadata: { contentType: img.type } });
+    await env.DB.prepare('UPDATE users SET avatar_key = ? WHERE id = ? AND avatar_key IS NULL').bind(key, u.id).run();
+    done++;
+  }
+  return done;
 }

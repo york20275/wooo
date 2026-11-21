@@ -3,7 +3,7 @@
 
 async function adminPage(tab) {
   if (!S.me || S.me.role !== 'gm') { shell('', h('main', { class: 'main' }, h('div', { class: 'empty glass' }, '只有 GM 可以使用後台'))); return; }
-  const tabs = [['dashboard', '儀表板'], ['users', '用戶管理'], ['posts', '內容管理'], ['reports', '檢舉處理'], ['appeals', '申訴'], ['boards', '分類版'], ['content', '✦ 內容帳號'], ['news', '新聞來源'], ['audit', '操作紀錄']];
+  const tabs = [['dashboard', '儀表板'], ['users', '用戶管理'], ['posts', '內容管理'], ['reports', '檢舉處理'], ['appeals', '申訴'], ['boards', '分類版'], ['content', '✦ 內容帳號'], ['news', '新聞來源'], ['server', '伺服器'], ['audit', '操作紀錄']];
   const nav = h('nav', { 'aria-label': '後台選單' },
     h('a', { href: '/', style: 'margin-bottom:12px' }, '← 回到網站'),
     tabs.map(([k, l]) => h('a', { href: k === 'dashboard' ? '/admin' : `/admin/${k}`, class: tab === k ? 'active' : '' }, l)));
@@ -13,7 +13,7 @@ async function adminPage(tab) {
 }
 const fmt = (t) => (t ? new Date(t).toLocaleString('zh-TW', { hour12: false }) : '—');
 const REASON = { spam: '垃圾訊息', harassment: '騷擾', copyright: '侵權', unmarked_sensitive: '未標記敏感內容', illegal: '違法內容', other: '其他' };
-const GROUP = { news: '時事', game: '遊戲', mixed: '綜合', fun: '趣事' };
+const GROUP = { news: '時事', game: '遊戲', mixed: '綜合', fun: '趣事', commenter: '留言' };
 const MODELS = [['@cf/meta/llama-3.3-70b-instruct-fp8-fast', 'Llama 3.3 70B（品質最好）', 40], ['@cf/meta/llama-4-scout-17b-16e-instruct', 'Llama 4 Scout 17B（中等）', 20], ['@cf/meta/llama-3.1-8b-instruct-fp8-fast', 'Llama 3.1 8B（最便宜，中文較普通）', 7]];
 function table(cols, rows) {
   return h('div', { class: 'tablewrap' }, h('table', null, h('thead', null, h('tr', null, cols.map((c) => h('th', { scope: 'col' }, c)))), h('tbody', null, rows)));
@@ -33,7 +33,87 @@ function barChart(days, series) {
         h('div', { class: 'stack-bars' }, series.map((s) => h('i', { style: `height:${Math.round((d[s.key] / max) * 100)}%;background:${s.color}` }))),
         h('small', null, d.day.slice(5).replace('-', '/'))))));
 }
+/** 熱門話題：遊戲帳號會依這裡的已知資訊發文（例如 GTA6） */
+function topicsCard(s, set) {
+  let topics = [];
+  try { topics = JSON.parse(s.hot_topics || '[]'); } catch {}
+  const box = h('section', { class: 'card glass' });
+  const draw = () => {
+    const rows = topics.map((t, i) => {
+      const name = h('input', { value: t.name, maxlength: '30', placeholder: '話題名稱，例如 GTA6' });
+      const ratio = h('select', null, [10, 20, 30, 40, 60, 80].map((v) => h('option', { value: String(v), selected: v === Number(t.ratio) ? true : null }, `遊戲帳號約 ${v}% 的文`)));
+      const facts = h('textarea', { rows: '4', maxlength: '1500', placeholder: '已知的真實資訊（AI 只會用這裡的內容講具體細節，避免亂編）' }); facts.value = t.facts || '';
+      const sync = () => { topics[i] = { name: name.value, ratio: Number(ratio.value), facts: facts.value, groups: t.groups || ['game'] }; };
+      [name, ratio, facts].forEach((x) => x.addEventListener('input', sync));
+      ratio.addEventListener('change', sync);
+      return h('div', { class: 'stack', style: 'gap:6px;padding:10px;border-radius:12px;background:rgba(255,255,255,.5)' }, h('div', { class: 'row' }, name, ratio, h('button', { class: 'btn ghost small', onclick: () => { topics.splice(i, 1); draw(); } }, '刪除')), facts);
+    });
+    box.replaceChildren(h('h2', null, '熱門話題'), h('span', { class: 'muted' }, '遊戲帳號會依比例發這些話題的心得、吐槽、新手建議，自動帶入最近相關新聞標題。具體細節只會用你填的資訊，不會亂編。'),
+      ...rows, h('div', { class: 'row' }, h('button', { class: 'btn ghost small', onclick: () => { topics.push({ name: '', ratio: 30, facts: '', groups: ['game'] }); draw(); } }, '＋ 新增話題'),
+        h('button', { class: 'btn small', onclick: async () => { await set('hot_topics', topics.filter((t) => t.name.trim())); toast('已儲存'); } }, '儲存話題')));
+  };
+  draw();
+  return box;
+}
+
+/** 伺服器用量：每 30 秒自動更新 */
+function meter(label, value, limit, fmtV = (x) => x.toLocaleString()) {
+  const pct = limit ? Math.min(100, (value / limit) * 100) : 0;
+  const color = pct >= 90 ? '#C0392B' : pct >= 70 ? '#D68910' : 'var(--primary)';
+  return h('div', { class: 'meter' }, h('div', { class: 'row between' }, h('span', null, label), h('b', null, `${fmtV(value)}${limit ? ` / ${fmtV(Math.round(limit))}` : ''}`)),
+    limit ? h('div', { class: 'mbar' }, h('i', { style: `width:${pct}%;background:${color}` })) : null,
+    limit ? h('small', { class: 'muted' }, `${pct.toFixed(1)}%${pct >= 90 ? '　⚠️ 快到上限了' : pct >= 70 ? '　注意' : ''}`) : null);
+}
+
 const ADMIN = {
+  async server(main) {
+    const d = await api('GET', '/api/admin/server');
+    const L = d.limits[d.plan];
+    const cf = d.cloudflare;
+    const wk = cf.workers || [];
+    const req = wk.reduce((n, x) => n + x.sum.requests, 0), err = wk.reduce((n, x) => n + x.sum.errors, 0);
+    const cpu99 = Math.max(0, ...wk.map((x) => x.quantiles.cpuTimeP99 / 1000));
+    const d1 = (cf.d1 || []).reduce((o, x) => ({ r: o.r + x.sum.rowsRead, w: o.w + x.sum.rowsWritten }), { r: 0, w: 0 });
+    const planSel = h('select', { 'aria-label': 'Cloudflare 方案' }, [['free', '免費方案'], ['paid', 'Workers 付費方案']].map(([v, l]) => h('option', { value: v, selected: v === d.plan ? true : null }, l)));
+    planSel.addEventListener('change', async () => { await api('PATCH', '/api/admin/settings', { cf_plan: planSel.value }); ADMIN.server(main); });
+    const hours = wk.slice(-24);
+    const maxH = Math.max(1, ...hours.map((x) => x.sum.requests));
+    main.replaceChildren(
+      h('div', { class: 'row between wrap' }, h('div', null, h('h1', null, '伺服器'), h('span', { class: 'muted' }, `每 30 秒自動更新 · ${fmt(d.time)}`)), h('label', { class: 'field' }, '目前方案', planSel)),
+      h('div', { class: 'stats' },
+        h('div', { class: 'stat glass' }, h('b', null, d.users.online5), h('span', null, '線上（5 分鐘內）')),
+        h('div', { class: 'stat glass' }, h('b', null, d.users.online30), h('span', null, '30 分鐘內活躍')),
+        h('div', { class: 'stat glass' }, h('b', null, d.users.active_today), h('span', null, '今日活躍用戶')),
+        h('div', { class: 'stat glass' }, h('b', { style: `color:${d.db.latency_ms > 300 ? '#C0392B' : 'inherit'}` }, `${d.db.latency_ms} ms`), h('span', null, '資料庫回應時間')),
+        h('div', { class: 'stat glass' }, h('b', { style: `color:${d.cron.healthy ? 'inherit' : '#C0392B'}` }, d.cron.healthy ? '正常' : '異常'), h('span', null, `排程（最後 ${fmt(d.cron.last_run)}）`))),
+      h('section', { class: 'card glass' }, h('h2', null, '今日用量'),
+        meter('AI 用量（估算 neurons）', d.ai.neurons_today_est, L.neurons),
+        d.db.size_bytes ? meter('資料庫大小（MB）', Math.round(d.db.size_bytes / 1048576), L.d1StorageMB) : null,
+        h('div', { class: 'groups' },
+          h('div', { class: 'field' }, '今日新文章', h('b', null, d.content.posts_today), h('small', { class: 'muted' }, `✦ ${d.content.ai_posts_today}`)),
+          h('div', { class: 'field' }, '今日新留言', h('b', null, d.content.comments_today), h('small', { class: 'muted' }, `✦ ${d.content.ai_comments_today}`)),
+          h('div', { class: 'field' }, '真人用戶', h('b', null, d.users.real.toLocaleString())),
+          h('div', { class: 'field' }, '上傳圖片', h('b', null, d.content.uploads.toLocaleString())))),
+      cf.enabled
+        ? h('section', { class: 'card glass' }, h('h2', null, 'Cloudflare 真實用量（最近 24 小時）'),
+            meter('網站請求數', req, L.requests),
+            meter('資料庫讀取列數', d1.r, L.d1Reads),
+            meter('資料庫寫入列數', d1.w, L.d1Writes),
+            cf.r2 ? meter('圖片空間（GB）', Number((cf.r2.payloadSize / 1073741824).toFixed(2)), L.r2StorageGB, (x) => String(x)) : null,
+            h('div', { class: 'groups' }, h('div', { class: 'field' }, '錯誤數', h('b', { style: `color:${err ? '#C0392B' : 'inherit'}` }, err)), h('div', { class: 'field' }, 'CPU 時間（P99）', h('b', null, `${cpu99.toFixed(1)} ms`), h('small', { class: 'muted' }, `上限 ${L.cpuMs} ms`))),
+            hours.length ? h('div', null, h('span', { class: 'muted' }, '每小時請求數'), h('div', { class: 'spark' }, hours.map((x) => h('i', { title: `${new Date(x.dimensions.datetimeHour).toLocaleString('zh-TW', { hour12: false })}：${x.sum.requests}`, style: `height:${Math.max(3, (x.sum.requests / maxH) * 100)}%` })))) : null,
+            cf.errors?.length ? h('small', { class: 'err' }, cf.errors.join('；')) : null)
+        : h('section', { class: 'card glass' }, h('h2', null, 'Cloudflare 真實用量'),
+            h('span', { class: 'muted' }, '上面是網站自己量得到的數字。要看 Cloudflare 的真實請求數、CPU、資料庫讀寫量，需要在 Cloudflare 建立一組「Account Analytics：Read」的 API 權杖，存成 wooo 的密鑰 CF_API_TOKEN。')),
+      h('section', { class: 'card glass' }, h('h2', null, '怎麼判斷撐不撐得住'),
+        h('ul', { class: 'list' },
+          h('li', null, '任何一條超過 70% 會變橘色、90% 變紅色。免費方案到上限會直接停止服務，建議在 70% 左右升級 Workers 付費方案（US$5／月）。'),
+          h('li', null, '資料庫回應時間平常在 50 ms 以內；常常超過 300 ms 代表查詢太多，需要優化。'),
+          h('li', null, '排程顯示「異常」代表 ✦ 帳號超過 15 分鐘沒動作，通常是 AI 額度用完或程式出錯。'))));
+    clearTimeout(ADMIN._srvTimer);
+    ADMIN._srvTimer = setTimeout(() => { if (location.pathname === '/admin/server') ADMIN.server(main).catch(() => {}); }, 30000);
+  },
+
   async dashboard(main) {
     const [d, st] = await Promise.all([api('GET', '/api/admin/dashboard'), api('GET', '/api/admin/stats?days=14')]);
     const s = d.stats;
@@ -190,6 +270,14 @@ const ADMIN = {
     const neurons = d.posts_per_day * perPost * 1.2;
     const monthly = Math.max(0, neurons - 10000) * 0.011 / 1000 * 30;
     modelSel.addEventListener('change', () => set('ai_model', modelSel.value).then(() => { toast('已儲存'); ADMIN.content(main); }));
+    const RANGES = [['5-50', '每篇 5～50 則'], ['3-20', '每篇 3～20 則'], ['1-10', '每篇 1～10 則'], ['0-0', '不留言']];
+    const curRange = `${s.comment_min ?? 5}-${s.comment_max ?? 50}`;
+    const commentSel = h('select', { 'aria-label': '每篇留言數' }, (RANGES.some(([v]) => v === curRange) ? RANGES : [[curRange, curRange.replace('-', '～') + ' 則'], ...RANGES]).map(([v, l]) => h('option', { value: v, selected: v === curRange ? true : null }, l)));
+    commentSel.addEventListener('change', async () => { const [mn, mx] = commentSel.value.split('-'); await api('PATCH', '/api/admin/settings', { comment_min: mn, comment_max: mx }); toast('已儲存'); });
+    const adultSel = h('select', { 'aria-label': '成人梗比例' }, [0, 5, 10, 20, 30].map((v) => h('option', { value: String(v), selected: String(v) === String(s.adult_ratio ?? '10') ? true : null }, v ? `約 ${v}%` : '不發成人梗')));
+    adultSel.addEventListener('change', () => set('adult_ratio', adultSel.value).then(() => toast('已儲存')));
+    const cModelSel = h('select', { 'aria-label': '留言用的 AI 模型' }, MODELS.map(([v, l]) => h('option', { value: v, selected: v === (s.comment_model || '@cf/meta/llama-3.1-8b-instruct-fp8-fast') ? true : null }, l)));
+    cModelSel.addEventListener('change', () => set('comment_model', cModelSel.value).then(() => toast('已儲存')));
     const ratioSel = h('select', { 'aria-label': '熱門動態牆中 ✦ 內容比例上限' }, [0, 20, 30, 50, 70, 100].map((v) => h('option', { value: String(v), selected: String(v) === String(s.feed_content_ratio ?? '50') ? true : null }, v === 100 ? '不限制' : `最多 ${v}%`)));
     ratioSel.addEventListener('change', () => set('feed_content_ratio', ratioSel.value).then(() => toast('已儲存')));
     const oldMode = h('select', { 'aria-label': '停用後的舊文' }, [['keep', '保留顯示'], ['hide', '全部隱藏']].map(([v, l]) => h('option', { value: v, selected: s.old_posts_mode === v ? true : null }, l)));
@@ -205,7 +293,9 @@ const ADMIN = {
         h('div', { class: 'groups' }, h('label', { class: 'field' }, '全站每天', dailySel),
           h('div', { class: 'field' }, '輪流狀況', h('b', { style: 'font-size:20px' }, cycle ? `每個帳號約 ${cycle < 1 ? Math.round(cycle * 24) + ' 小時' : cycle.toFixed(1) + ' 天'}輪到一次` : '—'),
             h('span', { class: 'muted' }, `${enabledTotal} 個帳號輪流，每次挑最久沒發文的那個。分組關掉就不會輪到。`)))),
-      h('div', { class: 'groups four' }, groupCard('news'), groupCard('game'), groupCard('mixed'), groupCard('fun')),
+      h('div', { class: 'groups four' }, groupCard('news'), groupCard('game'), groupCard('mixed'), groupCard('fun'), groupCard('commenter')),
+      d.groups.commenter ? null : h('section', { class: 'card glass' }, h('h2', null, '留言專用帳號'), h('span', { class: 'muted' }, '還沒建立 200 個留言專用 ✦ 帳號。'), h('button', { class: 'btn', style: 'align-self:flex-start', onclick: async () => { const r = await api('POST', '/api/admin/content/seed-commenters'); toast(`已建立 ${r.added} 個`); ADMIN.content(main); } }, '建立 200 個留言帳號')),
+      topicsCard(s, set),
       h('section', { class: 'card glass' }, h('h2', null, '真實照片'),
         h('span', { class: 'muted' }, '時事以外的貼文，部分會從免費圖庫找一張符合內容的真實照片，右下角標示攝影者。不填金鑰也會用 Openverse（CC0／公眾領域／CC BY 授權）；填了 Pixabay 金鑰（pixabay.com/api/docs 免費申請）畫質更好。'),
         h('div', { class: 'groups' }, h('label', { class: 'field' }, '附照片的比例', photoSel),
@@ -220,6 +310,9 @@ const ADMIN = {
           h('div', { class: 'field' }, '內容帳號互相按讚', sw(s.interact_like === '1', (v) => set('interact_like', v ? '1' : '0'), '互相按讚')),
           h('div', { class: 'field' }, '內容帳號互相留言', sw(s.interact_comment === '1', (v) => set('interact_comment', v ? '1' : '0'), '互相留言')),
           h('label', { class: 'field' }, '停用後的舊文', oldMode),
+          h('label', { class: 'field' }, '每篇 ✦ 文章的留言數', commentSel),
+          h('label', { class: 'field' }, '成人梗比例（會標記敏感）', adultSel),
+          h('label', { class: 'field' }, '留言用的 AI 模型', cModelSel),
           h('div', { class: 'field' }, '每日熱門投票（每天 10 點）', h('div', { class: 'row' }, sw(s.daily_poll !== '0', (v) => set('daily_poll', v ? '1' : '0'), '每日投票'),
             h('button', { class: 'btn ghost small', onclick: async () => { const r = await api('POST', '/api/admin/content/daily-poll'); toast(r.posted ? `已發布：${r.question}` : r.skipped); } }, '立刻發一題'))))),
       h('section', { class: 'card glass' },

@@ -11,6 +11,9 @@ export interface Env {
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   NEWSDATA_API_KEY?: string;
+  CF_API_TOKEN?: string;
+  CF_ACCOUNT_ID?: string;
+  D1_DATABASE_ID?: string;
   PEXELS_API_KEY?: string;
   PEXELS_API_BASE?: string;
   TURNSTILE_SITEKEY?: string;

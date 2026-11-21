@@ -35,6 +35,9 @@ crons = ["* * * * *"]
 
 [vars]
 SITE_NAME = "窩Woo！"
+# 後台「伺服器」頁用：Cloudflare 帳號與資料庫編號（不是機密；另外要設定 CF_API_TOKEN 密鑰才抓得到真實用量）
+CF_ACCOUNT_ID = "853d9713c559a9d19d5c18ed381cc21b"
+D1_DATABASE_ID = "5c4b35d1-3bc5-4322-b050-78888b521c2c"
 # 網站網址（Google 登入回呼、分享連結用），不要結尾斜線
 SITE_URL = "https://wootw.com"
 # GM 管理員的 Gmail，多個用逗號分隔

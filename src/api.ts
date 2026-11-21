@@ -33,7 +33,7 @@ export function requireHuman(c: any, u: User) {
   if (needsHumanCheck(c.env, u)) throw new HttpError(428, '請先完成人機驗證');
 }
 
-export const POST_COLS = `p.id, p.user_id, p.text, p.title, p.kind, p.image_key, p.images, p.repost_of, p.quote_of, p.repost_count, p.community_id, p.is_daily, p.image_credit, p.image_credit_url, p.link_url, p.link_title, p.link_site, p.sensitive, p.source,
+export const POST_COLS = `p.id, p.user_id, p.text, p.title, p.kind, p.image_key, p.images, p.repost_of, p.quote_of, p.repost_count, p.community_id, p.is_daily, p.view_count, p.image_credit, p.image_credit_url, p.link_url, p.link_title, p.link_site, p.sensitive, p.source,
   p.like_count, p.comment_count, p.created_at,
   u.id AS author_id, u.name AS author_name, u.handle AS author_handle, u.avatar_key AS author_avatar, u.is_content AS author_is_content`;
 
@@ -95,6 +95,7 @@ export function serializePost(r: any, ctx?: Ctx) {
     like_count: r.like_count,
     comment_count: r.comment_count,
     repost_count: r.repost_count || 0,
+    view_count: r.view_count || 0,
     liked: !!reaction,
     reaction,
     reactions: ctx?.summary.get(r.id) ?? [],
@@ -471,6 +472,14 @@ api.post('/posts/:id/vote', async (c) => {
   if (r.meta.changes) await c.env.DB.prepare('UPDATE poll_options SET votes = votes + 1 WHERE post_id = ? AND idx = ?').bind(id, idx).run();
   const polls = await pollsFor(c, [id]);
   return c.json({ poll: polls.get(id) });
+});
+
+/** 瀏覽次數：前端把真的出現在畫面上的文章 id 批次送來（每次最多 50 篇） */
+api.post('/views', async (c) => {
+  const b = await c.req.json<any>().catch(() => ({}));
+  const ids = [...new Set((Array.isArray(b.ids) ? b.ids : []).map(String).filter((x: string) => /^[\w]{6,40}$/.test(x)))].slice(0, 50) as string[];
+  if (ids.length) await c.env.DB.prepare(`UPDATE posts SET view_count = view_count + 1 WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids).run();
+  return c.json({ ok: true });
 });
 
 /** 打字時的提示：@帳號、#標籤 */

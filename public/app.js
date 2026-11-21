@@ -280,6 +280,31 @@ function pollBox(p) {
   return box;
 }
 
+/** 瀏覽次數：文章真的出現在畫面上超過 1 秒才算一次（同一次瀏覽只算一次），每 5 秒批次送出 */
+const VIEWS = { seen: new Set(), pending: new Set(), timer: null, io: null };
+function fmtCount(n) { return n >= 10000 ? `${(n / 10000).toFixed(n >= 100000 ? 0 : 1)}萬` : String(n); }
+function flushViews() {
+  if (!VIEWS.pending.size) return;
+  const ids = [...VIEWS.pending]; VIEWS.pending.clear();
+  fetch('/api/views', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }), keepalive: true, credentials: 'same-origin' }).catch(() => {});
+}
+function trackView(el, id) {
+  if (!('IntersectionObserver' in window) || VIEWS.seen.has(id)) return;
+  if (!VIEWS.io) {
+    VIEWS.io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        const pid = e.target.dataset.pid;
+        if (e.isIntersecting) e.target._vt = setTimeout(() => { if (!VIEWS.seen.has(pid)) { VIEWS.seen.add(pid); VIEWS.pending.add(pid); } VIEWS.io.unobserve(e.target); }, 1000);
+        else clearTimeout(e.target._vt);
+      }
+    }, { threshold: 0.5 });
+    VIEWS.timer = setInterval(flushViews, 5000);
+    addEventListener('pagehide', flushViews);
+  }
+  el.dataset.pid = id;
+  VIEWS.io.observe(el);
+}
+
 function postCard(p, { onDelete, full = false, pinned = false } = {}) {
   const el = h('article', { class: 'post glass' });
   const likeBtn = reactionControl(p);
@@ -337,10 +362,12 @@ function postCard(p, { onDelete, full = false, pinned = false } = {}) {
       p.poll ? pollBox(p) : null,
       media,
       p.quote ? quoteCard(p.quote) : null,
+      h('div', { class: 'pstats' }, h('span', null, `${fmtCount(p.view_count || 0)} 次瀏覽`), h('span', null, `${fmtCount((p.like_count || 0) + (p.comment_count || 0) + (p.repost_count || 0))} 次互動`)),
       h('div', { class: 'actions' }, likeBtn,
         h('a', { class: 'icon-btn', href: `/p/${p.id}`, 'aria-label': '留言' }, icon('chat'), String(p.comment_count)),
         p.kind !== 'blog' ? repostControl(p) : null,
         menuWrap)));
+  trackView(el, p.id);
   return el;
 }
 async function likesModal(id) {

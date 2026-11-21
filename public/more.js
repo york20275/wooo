@@ -269,8 +269,8 @@ async function communitiesPage() {
   try {
     const d = await api('GET', '/api/communities');
     main.replaceChildren(pageTitle('分類版'), h('span', { class: 'muted', style: 'margin:0 4px' }, '發文時選一個分類版，文章就會出現在那裡。'),
-      ...d.communities.map((c) => h('a', { class: 'ccard glass', href: `/c/${c.slug}` }, h('span', { class: 'cicon' }, c.icon || '💬'),
-        h('div', { class: 'body' }, h('b', null, c.name), h('span', { class: 'muted' }, c.description || ''), h('small', { class: 'muted' }, `${c.post_count} 篇文章`)))));
+      h('div', { class: 'cgrid' }, d.communities.map((c) => h('a', { class: 'ccard sq glass', href: `/c/${c.slug}`, title: c.description || c.name }, h('span', { class: 'cicon' }, c.icon || '💬'),
+        h('b', null, c.name), h('span', { class: 'muted desc' }, c.description || ''), h('small', { class: 'muted' }, `${c.post_count} 篇文章`)))));
   } catch (e) { main.replaceChildren(h('div', { class: 'empty err' }, e.message)); }
 }
 

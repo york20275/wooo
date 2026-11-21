@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS posts (
   repost_count INTEGER NOT NULL DEFAULT 0,    -- 被轉發＋引用的次數
   community_id TEXT,                          -- 發在哪個社團
   is_daily INTEGER NOT NULL DEFAULT 0,        -- 1 = 每日熱門投票
+  view_count INTEGER NOT NULL DEFAULT 0,      -- 真人瀏覽次數
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);

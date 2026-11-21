@@ -3,8 +3,9 @@ import { getSettings, logContent, newId, now } from './env';
 import { BASE_RULES, generate } from './ai';
 import { fetchNews as fetchNewsImpl, takeNews, type NewsItem } from './news';
 import { addComment, addLike } from './api';
-import { findPhoto, splitPhotoLine, topicQuery } from './photos';
+import { assignAvatars, findPhoto, splitPhotoLine, topicQuery } from './photos';
 import { cleanupStories, runDailyPoll } from './features';
+import { migrate } from './migrate';
 
 export const fetchNews = fetchNewsImpl;
 export const GROUPS = ['news', 'game', 'mixed', 'fun'] as const;
@@ -44,37 +45,62 @@ function chooseBoard(boards: Board[], a: Account, isNews: boolean): Board | null
   return weighted[weighted.length - 1].b;
 }
 
-async function writePost(env: Env, model: string, a: Account, news: NewsItem | null, wantPhoto = false, board: Board | null = null): Promise<string | null> {
-  const boardLine = board && !news ? `\n這篇要發在「${board.name}」分類版（${board.description || board.name}）。內容要符合這個版的主題，但保持你的說話風格；如果這個版跟你平常的主題不同，就用你的角度聊這個版的話題。` : '';
+type Style = 'banter' | 'joke' | 'adult' | 'normal' | 'topic';
+interface HotTopic { name: string; facts: string; ratio: number; groups?: string[] }
+
+export function hotTopics(s: Record<string, string>): HotTopic[] {
+  try { const t = JSON.parse(s.hot_topics || '[]'); return Array.isArray(t) ? t.filter((x) => x && x.name) : []; } catch { return []; }
+}
+
+/** 每篇文挑一種風格：幹話、笑話、成人梗、一般短文；遊戲相關帳號有機率聊熱門話題 */
+function chooseStyle(s: Record<string, string>, a: Account): { style: Style; topic: HotTopic | null } {
+  for (const t of hotTopics(s)) {
+    const groups = t.groups && t.groups.length ? t.groups : ['game'];
+    if (groups.includes(a.content_group) && Math.random() * 100 < Number(t.ratio || 0)) return { style: 'topic', topic: t };
+  }
+  const adult = Math.max(0, Math.min(40, Number(s.adult_ratio ?? 10)));
+  const w: [Style, number][] = a.content_group === 'fun'
+    ? [['banter', 30], ['joke', 30], ['adult', adult], ['normal', 30]]
+    : [['banter', 35], ['joke', 20], ['adult', adult], ['normal', 35]];
+  let r = Math.random() * w.reduce((n, x) => n + x[1], 0);
+  for (const [st, n] of w) { r -= n; if (r <= 0) return { style: st, topic: null }; }
+  return { style: 'normal', topic: null };
+}
+
+const REFUSAL = /抱歉|對不起，我|我無法|我不能|無法提供|不適合提供|作為(一個)?(AI|人工智慧|語言模型)|AI 助理/;
+
+async function writePost(env: Env, model: string, a: Account, news: NewsItem | null, wantPhoto = false, board: Board | null = null, style: Style = 'normal', topic: HotTopic | null = null, headlines: string[] = []): Promise<string | null> {
+  const boardLine = board && !news && style !== 'topic' ? `\n這篇發在「${board.name}」分類版（${board.description || board.name}），內容跟這個版有關，但保持你的說話風格。` : '';
   const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。${boardLine}`;
   if (news) {
     const prompt = `請根據下面這則新聞的標題與摘要寫一則重點整理貼文。
-開頭固定寫「【新聞重點】」，接著用 2 到 4 句話整理重點，只能使用這裡提供的資訊，不可以加入沒提到的事實。
-最後可以用一句話說說一般人可能關心的地方，保持中立，不表達政治立場。全文 80 到 180 字，不要附網址。
+開頭固定寫「【新聞重點】」，接著用 1 到 3 句話整理重點，只能使用這裡提供的資訊，不可以加入沒提到的事實，保持中立。全文 50 到 110 字，不要附網址。
 新聞標題：${news.title}
 新聞摘要：${news.description || '（無摘要，只根據標題整理，不要延伸）'}`;
-    const out = await generate(env, system, prompt, 320, model);
-    return out ?? `【新聞重點】\n${news.title}${news.description ? '\n' + news.description.slice(0, 120) : ''}`;
+    const out = await generate(env, system, prompt, 260, model);
+    return out ?? `【新聞重點】\n${news.title}`;
   }
-  const prompt = a.content_group === 'fun'
-    ? `現在是${twNow()}。依照你的主題與說話風格，寫一則好笑的生活趣事貼文。
-可以是虛構的日常小故事或觀察，但要像在台灣真的會遇到的情境；不要提到真實的人名、店名或品牌。
-2 到 5 句話，50 到 160 字，最後一句要有笑點或反轉，可以加最多一個 #話題標籤。每次換完全不同的情境。`
-    : `現在是${twNow()}。依照你的主題與個性，寫一則社群貼文。
-2 到 4 句話，60 到 150 字，可以在結尾問大家一個輕鬆的問題，或加上最多一個 #話題標籤。
-每次換不同的小話題，不要每篇都一樣。`;
-  const photoAsk = wantPhoto ? '\n這篇會配一張照片：寫完貼文後，另起最後一行寫「PHOTO: 」加上 2 到 4 個英文單字，描述適合搭配的照片場景或物品（不要人物特寫）。' : '';
-  const out = await generate(env, system, prompt + photoAsk, 320, model);
-  if (out) return out;
+  const when = `現在是${twNow()}。`;
+  const prompts: Record<Style, string> = {
+    banter: `${when}隨手發一句幹話或廢文，像滑手機時打的碎念：5 到 25 個字，可以很無厘頭、厭世或自嘲，不要 hashtag，不要解釋。`,
+    joke: `${when}講一個很短的笑話、冷笑話或諧音梗，20 到 60 個字，最後一句是笑點，不要解釋笑點。`,
+    adult: `${when}寫一個成年人看得懂的黃色梗或雙關笑話，靠諧音、雙關或暗示讓人會心一笑，20 到 60 個字。不能有露骨的性描寫，只能涉及成年人，不要解釋。`,
+    normal: a.content_group === 'fun'
+      ? `${when}寫一則好笑的生活小事，1 到 3 句話、20 到 80 個字，最後要有笑點或反轉，可以是虛構情境，不要提到真實人名、店名或品牌。`
+      : `${when}依照你的主題與個性，寫一則簡短的社群貼文，1 到 3 句話、20 到 80 個字，可以問大家一個輕鬆的問題。`,
+    topic: `${when}最近大家都在聊「${topic?.name}」。用玩家的口吻發一則貼文，可以是心得、吐槽、期待、新手建議或問大家問題，20 到 100 個字，可以加 #${(topic?.name || '').replace(/\s+/g, '')}。
+具體資訊只能用下面提供的內容，不要捏造任務名稱、數字、角色、地點或彩蛋；沒提供的細節就講個人感受或一般玩法建議。
+已知資訊：${topic?.facts || ''}${headlines.length ? `\n最近新聞標題：\n${headlines.slice(0, 6).join('\n')}` : ''}`,
+  };
+  const photoAsk = wantPhoto ? '\n這篇會配一張照片：寫完貼文後，另起最後一行寫「PHOTO: 」加上 2 到 4 個英文單字，描述適合搭配的照片場景或物品（不要人物）。' : '';
+  const out = await generate(env, system, prompts[style] + photoAsk, style === 'banter' ? 80 : 220, model);
+  if (out && !REFUSAL.test(out)) return out.replace(/^["「『]|["」』]$/g, '').trim();
+  if (out) return null;
   if (env.DEV_MODE !== '1') return null; // 正式環境 AI 失敗就不發，避免重複的罐頭文
-  return pick([
-    `${twNow()}，又是想窩著什麼都不做的時刻。大家現在在做什麼？`,
-    `今天的小目標：好好吃一頓飯、早點睡。你今天的小目標是什麼？`,
-    `剛剛在路上看到一隻貓坐得比我還端正，我決定今天向牠看齊。`,
-  ]);
+  return pick(style === 'banter' ? ['好想下班', '今天也是廢廢的一天', '肚子餓到可以吃下一頭牛'] : style === 'joke' ? ['為什麼海很鹹？因為魚在裡面流汗。'] : [`${twNow()}，又是想窩著什麼都不做的時刻。大家現在在做什麼？`]);
 }
 
-async function postOne(env: Env, model: string, a: Account, photoRatio: number, boards: Board[]): Promise<string | null> {
+async function postOne(env: Env, model: string, a: Account, photoRatio: number, boards: Board[], s: Record<string, string>): Promise<string | null> {
   // 不論成功與否都排到隊伍最後面，下一則換別人（輪流）
   const toBack = env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(now(), a.id);
   let news: NewsItem | null = null;
@@ -82,9 +108,18 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
     news = await takeNews(env);
     if (!news) { await toBack.run(); return null; }
   }
-  const board = chooseBoard(boards, a, !!news);
-  const wantPhoto = !news && Math.random() * 100 < photoRatio;
-  const raw = await writePost(env, model, a, news, wantPhoto, board);
+  const { style, topic } = news ? { style: 'normal' as Style, topic: null } : chooseStyle(s, a);
+  let board = chooseBoard(boards, a, !!news);
+  let headlines: string[] = [];
+  if (style === 'topic' && topic) {
+    board = boards.find((b) => b.content_group === 'game') || board;
+    const kw = topic.name.replace(/\s+/g, '').slice(0, 10);
+    const r = await env.DB.prepare("SELECT title FROM news_cache WHERE replace(title, ' ', '') LIKE ? ORDER BY fetched_at DESC LIMIT 6").bind(`%${kw}%`).all<{ title: string }>();
+    headlines = r.results.map((x) => x.title);
+  }
+  if (style === 'adult') board = boards.find((b) => b.id === 'cm_free') || board;
+  const wantPhoto = !news && (style === 'normal' || style === 'topic') && Math.random() * 100 < photoRatio;
+  const raw = await writePost(env, model, a, news, wantPhoto, board, style, topic, headlines);
   if (!raw) {
     await toBack.run();
     await logContent(env.DB, 'error', a.id, `${a.name}：AI 生成失敗，這次跳過`);
@@ -93,12 +128,13 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   const { text, query } = splitPhotoLine(raw);
   if (!text) { await toBack.run(); return null; }
   // 照片找不到就只發文字，不影響發文
-  const photo = wantPhoto ? await findPhoto(env, query || topicQuery(`${board?.name || ''}${board?.description || ''}${a.persona}`)).catch(() => null) : null;
+  const photoQuery = query || (style === 'topic' ? 'video game controller' : topicQuery(`${board?.name || ''}${board?.description || ''}${a.persona}`));
+  const photo = wantPhoto ? await findPhoto(env, photoQuery).catch(() => null) : null;
   const id = newId();
   const t = now();
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO posts (id, user_id, text, image_key, image_credit, image_credit_url, link_url, link_title, link_site, community_id, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'content', ?)`)
-      .bind(id, a.id, text.slice(0, 1000), photo?.key ?? null, photo?.credit ?? null, photo?.creditUrl ?? null, news?.url ?? null, news?.title ?? null, news ? siteOf(news.url, news.source) : null, board?.id ?? null, t),
+    env.DB.prepare(`INSERT INTO posts (id, user_id, text, image_key, image_credit, image_credit_url, link_url, link_title, link_site, community_id, sensitive, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'content', ?)`)
+      .bind(id, a.id, text.slice(0, 1000), photo?.key ?? null, photo?.credit ?? null, photo?.creditUrl ?? null, news?.url ?? null, news?.title ?? null, news ? siteOf(news.url, news.source) : null, board?.id ?? null, style === 'adult' ? 1 : 0, t),
     env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(t, a.id),
     ...(board ? [env.DB.prepare('UPDATE communities SET post_count = post_count + 1 WHERE id = ?').bind(board.id)] : []),
   ]);
@@ -136,7 +172,7 @@ export async function runPostTick(env: Env, opts: { force?: boolean } = {}) {
     if (!left?.n) await fetchNewsImpl(env);
   }
   const boards = (await env.DB.prepare('SELECT id, name, description, content_group FROM communities').all<Board>()).results;
-  const results = await Promise.all(due.results.map((a) => postOne(env, model, a, Number(s.photo_ratio ?? 30), boards).catch(() => null)));
+  const results = await Promise.all(due.results.map((a) => postOne(env, model, a, Number(s.photo_ratio ?? 30), boards, s).catch(() => null)));
   const posted = results.filter(Boolean).length;
   if (posted) await logContent(env.DB, 'post', null, `發文 ${posted} 則（${due.results.filter((_, i) => results[i]).map((a) => a.name).join('、')}）`);
   return posted ? { posted: results.find(Boolean), account: due.results[results.findIndex(Boolean)].name, count: posted } : { skipped: '這次沒有成功發文（可能沒有新聞或 AI 失敗）' };
@@ -151,10 +187,8 @@ export async function runInteractTick(env: Env) {
   ).bind(now() - 24 * 3600_000).all<{ id: string; user_id: string; text: string; g: string }>();
   if (!recent.results.length) return;
   const likers = await env.DB.prepare('SELECT id FROM users WHERE is_content = 1 AND content_enabled = 1 ORDER BY RANDOM() LIMIT 8').all<{ id: string }>();
-
-  // 依每天發文量調整互動量：平均每則文約 5 個讚、每 3 則文約 1 則留言
   const daily = dailyPosts(s);
-  const likes = Math.min(6, randRound((daily * 5) / 1440));
+  const likes = Math.min(6, randRound((daily * 8) / 1440));
   if (s.interact_like === '1' && likes) {
     await Promise.all(recent.results.slice(0, likes).map((p, i) => {
       const liker = likers.results[i];
@@ -163,22 +197,86 @@ export async function runInteractTick(env: Env) {
       return liker && liker.id !== p.user_id ? addLike(env, p.id, { id: liker.id, is_content: 1 }, undefined, emoji) : null;
     }));
   }
-  if (s.interact_comment === '1' && Math.random() < Math.min(1, daily / 3 / 1440)) {
-    const p = recent.results[recent.results.length - 1];
-    const a = await env.DB.prepare('SELECT id, name, handle, content_group, persona FROM users WHERE is_content = 1 AND content_enabled = 1 AND id != ? ORDER BY RANDOM() LIMIT 1').bind(p.user_id).first<Account>();
-    if (!a) return;
-    const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。`;
-    const reply = await generate(env, system, `你在別人的貼文底下留言。用 1 到 2 句話、30 字以內，自然地回應這篇貼文：\n${p.text.slice(0, 300)}`, 120, s.ai_model || env.AI_MODEL);
-    if (!reply && env.DEV_MODE !== '1') return;
-    const text = reply ?? pick(['好有共鳴', '這個我懂', '笑死', '先收藏起來']);
-    await addComment(env, p.id, a, text.slice(0, 200));
+  if (s.interact_comment === '1') await runCommentTick(env, s);
+}
+
+/** 每篇 ✦ 貼文的目標留言數（依文章 id 固定，在 min～max 之間，偏向少數篇特別熱門） */
+function commentTarget(id: string, min: number, max: number) {
+  let h = 0;
+  for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const r = (h % 1000) / 1000;
+  return min + Math.floor((max - min) * r * r);
+}
+
+const QUICK = ['笑死', '哈哈哈哈哈', 'XD', '+1', '真的', '我也是', '推', '太扯了吧', '同感', '樓上說的對', '好喔', '這我可以', '羨慕', '有料', '笑到不行', '確實', '我就爛', '先推再看', '這個好', '欸真的', '好真實', '不意外', '有笑有推', '這篇讚', '哈哈哈哈好可愛', '哇', '太神了', '我懂', '可以', '沒毛病'];
+const QUICK_ADULT = ['老司機開車了', '我好像懂了什麼', '這不是去幼稚園的車', '純潔的我看不懂', '你這樣大家都懂了', '車速有點快', '我什麼都沒看到'];
+const QUICK_JOKE = ['好冷', '冷到結冰', '噗', '可以，這很可以', '我笑了我輸了', '這個梗給你一百分', '笑到肚子痛'];
+
+/**
+ * 留言排程：只在 ✦ 貼文底下，由「留言」組帳號輪流留言。
+ * 每篇目標 5～50 則（後台可調），隨著時間自然累積（大約 12 小時內留完），每分鐘最多 5 則。
+ * ✦ 帳號絕不在真人的文章底下留言。
+ */
+async function runCommentTick(env: Env, s: Record<string, string>) {
+  if (s.group_commenter === '0') return;
+  const min = Math.max(0, Number(s.comment_min ?? 5));
+  const max = Math.max(min, Number(s.comment_max ?? 50));
+  if (!max) return;
+  const posts = await env.DB.prepare(
+    `SELECT p.id, p.text, p.comment_count, p.created_at, p.sensitive, p.user_id FROM posts p JOIN users u ON u.id = p.user_id
+     WHERE p.source = 'content' AND u.is_content = 1 AND p.hidden = 0 AND p.kind = 'post' AND p.created_at > ? ORDER BY p.created_at DESC LIMIT 300`
+  ).bind(now() - 48 * 3600_000).all<{ id: string; text: string; comment_count: number; created_at: number; sensitive: number; user_id: string }>();
+  const due = posts.results.filter((p) => {
+    const target = commentTarget(p.id, min, max);
+    const age = (now() - p.created_at) / (12 * 3600_000);
+    return p.comment_count < Math.floor(target * Math.min(1, Math.sqrt(Math.max(0, age)) + 0.05));
+  }).sort(() => Math.random() - 0.5).slice(0, 5);
+  const model = s.comment_model || '@cf/meta/llama-3.1-8b-instruct-fp8-fast';
+  for (const p of due) {
+    const a = await env.DB.prepare(
+      `SELECT id, name, handle, content_group, persona FROM users WHERE is_content = 1 AND content_enabled = 1 AND content_group = 'commenter'
+       AND id NOT IN (SELECT user_id FROM comments WHERE post_id = ?) ORDER BY COALESCE(last_posted_at, 0) ASC, RANDOM() LIMIT 1`
+    ).bind(p.id).first<Account>();
+    if (!a) continue;
+    await env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(now(), a.id).run();
+    // 三成機率回覆底下已有的留言
+    const parent = Math.random() < 0.3 ? await env.DB.prepare('SELECT id, text FROM comments WHERE post_id = ? AND parent_id IS NULL ORDER BY RANDOM() LIMIT 1').bind(p.id).first<{ id: string; text: string }>() : null;
+    let text: string | null = null;
+    if (Math.random() < 0.45) {
+      text = pick(p.sensitive ? QUICK_ADULT.concat(QUICK) : /笑|梗|為什麼|因為/.test(p.text) ? QUICK_JOKE.concat(QUICK) : QUICK);
+    } else {
+      const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，個性：${a.persona}。`;
+      const ask = parent
+        ? `貼文：${p.text.slice(0, 200)}\n有人留言：${parent.text.slice(0, 100)}\n請回覆這則留言，像網友一樣，3 到 25 個字，只寫回覆內容。`
+        : `在這篇貼文底下留言，像網友一樣自然回應，3 到 25 個字，只寫留言內容：\n${p.text.slice(0, 300)}`;
+      const out = await generate(env, system, ask, 60, model);
+      if (out && !REFUSAL.test(out)) text = out.replace(/^["「『]|["」』]$/g, '').trim();
+    }
+    if (!text) continue;
+    await addComment(env, p.id, a, text.slice(0, 120), parent?.id ?? null);
+    if (Math.random() < 0.5) await addLike(env, p.id, { id: a.id, is_content: 1 }, undefined, p.sensitive || Math.random() < 0.3 ? '😂' : '❤️');
   }
 }
 
-/** Cron 進入點（每分鐘） */
+/** 一次建立 200 個留言專用帳號（已經有的會略過） */
+export async function seedCommenters(env: Env) {
+  const { COMMENTERS } = await import('./commenter-seed');
+  let added = 0;
+  for (let i = 0; i < COMMENTERS.length; i += 20) {
+    const chunk = COMMENTERS.slice(i, i + 20);
+    const r = await env.DB.prepare(
+      `INSERT OR IGNORE INTO users (id, name, handle, is_content, content_group, persona, created_at) VALUES ${chunk.map(() => "(?, ?, ?, 1, 'commenter', ?, ?)").join(', ')}`
+    ).bind(...chunk.flat()).run();
+    added += r.meta.changes || 0;
+  }
+  return added;
+}
+
 export async function handleCron(env: Env, _cron: string) {
+  await migrate(env).catch((e) => console.log('migrate', String(e)));
   await runPostTick(env).catch((e) => console.log('post tick', String(e)));
   await runInteractTick(env).catch((e) => console.log('interact tick', String(e)));
+  await assignAvatars(env, 3).catch((e) => console.log('avatars', String(e)));
   const d = new Date();
   const m = d.getUTCMinutes();
   if (m === 0 || m === 30) await fetchNewsImpl(env).catch(() => {});
