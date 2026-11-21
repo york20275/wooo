@@ -369,4 +369,4 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
   ('group_mixed', '1'),
   ('paused_until', '0'),
   ('newsdata_key', ''),
-  ('rss_feeds', '[]');
+  ('rss_feeds', '["https://news.ltn.com.tw/rss/all.xml","https://news.pts.org.tw/xml/newsfeed.xml","https://feeds.feedburner.com/rsscna/politics"]');
