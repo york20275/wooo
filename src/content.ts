@@ -77,8 +77,9 @@ function fixTypos(t: string) { return TYPOS.reduce((s, [re, to]) => s.replace(re
 async function reviewPost(env: Env, model: string, text: string): Promise<string | null> {
   if ([...text].length <= 6) return text;
   const out = await generate(env, '你是台灣社群網站的文字編輯，用繁體中文，只輸出結果，不要解釋。', `檢查下面這則貼文：
-1. 是否通順、看得懂、有意思（語無倫次、重複繞口、看不懂在講什麼都算不合格）；情節是否合乎常理（例如：吃漢堡本來就用手，不會需要叉子或筷子；不會有像犯罪或被困住的情節；前後不能矛盾）。
-2. 有沒有錯字或不自然的用詞。
+1. 是否符合台灣生活常識（例如捷運上不能吃東西、機車要戴安全帽）與現在的時間（${twNow()}；下午不會說早安）。
+2. 是否通順、看得懂、有意思（語無倫次、重複繞口、看不懂在講什麼都算不合格）；情節是否合乎常理（例如：吃漢堡本來就用手，不會需要叉子或筷子；不會有像犯罪或被困住的情節；前後不能矛盾）。
+3. 有沒有錯字或不自然的用詞。
 如果不合格或情節不合理，只回覆「NO」。
 如果合理，回覆修正錯字後的全文（只修錯字和不通順的地方，不要改內容、不要加字、不要加引號）。
 
@@ -101,6 +102,7 @@ async function ogImage(url: string): Promise<string | null> {
       || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["'](?:og:image|twitter:image)["']/i);
     if (!m) return null;
     const img = new URL(m[1].replace(/&amp;/g, '&'), r.url).toString();
+    if (/logo|default|placeholder|250_ltn|og_image_default|share\.(png|jpg)$/i.test(img)) return null; // 網站的預設 LOGO 不算縮圖
     return /^https:\/\//.test(img) && img.length < 600 ? img : null;
   } catch { return null; }
 }
@@ -132,7 +134,7 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
 具體資訊只能用下面提供的內容，不要捏造任務名稱、數字、角色、地點或彩蛋；沒提供的細節就講個人感受或一般玩法建議。
 已知資訊：${topic?.facts || ''}${headlines.length ? `\n最近新聞標題：\n${headlines.slice(0, 6).join('\n')}` : ''}`,
   };
-  const photoAsk = wantPhoto ? '\n這篇會配一張用手機隨手拍的照片：寫完貼文後，另起最後一行寫「PHOTO: 」加上 8 到 20 個英文單字，具體描述照片畫面，要跟貼文內容一致（例如貼文說客廳很亂，就寫 messy living room with clothes and snack bags on the sofa）。不要拍到人臉、不要有文字或品牌。' : '';
+  const photoAsk = wantPhoto ? '\n這篇會配一張用手機隨手拍的照片：寫完貼文後，另起最後一行寫「PHOTO: 」加上 8 到 20 個英文單字，具體描述照片畫面，要跟貼文內容一致（例如貼文說客廳很亂，就寫 messy living room with clothes and snack bags on the sofa）。畫面只能有物品、食物、動物、地點或風景，絕對不能有人、人臉、手或身體，也不要有文字或品牌。' : '';
   const out = await generate(env, system, prompts[style] + photoAsk, style === 'banter' ? 80 : 220, model);
   if (out && !REFUSAL.test(out)) {
     const lines = out.replace(/^["「『]|["」』]$/g, '').trim().split('\n');

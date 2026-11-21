@@ -130,7 +130,8 @@ export const IMAGE_MODEL = '@cf/black-forest-labs/flux-1-schnell';
 /** 用 AI 生成一張圖存到 R2（不用別人的照片）。失敗就回傳 null */
 export async function aiImage(env: Env, prompt: string, folder = 'c', square = false): Promise<string | null> {
   try {
-    const full = `${prompt}, ${square ? 'cute avatar picture, centered subject, soft background' : 'realistic amateur photo, natural lighting, everyday scene, no phone in frame, no hands, plain unbranded packaging'}, no text, no letters, no watermark, no logo`;
+    const clean = prompt.replace(/\b(man|woman|men|women|person|people|guy|girl|boy|kid|child|children|someone|selfie|hand|hands|face|friend|friends|he|she|his|her)\b/gi, '').replace(/\s+/g, ' ');
+    const full = `${clean}, ${square ? 'cute avatar picture, centered subject, soft background' : 'realistic amateur photo, natural lighting, everyday scene, no people, no person, no hands, no face, no phone in frame, plain unbranded packaging'}, no text, no letters, no watermark, no logo`;
     const out = (await env.AI.run(IMAGE_MODEL as any, { prompt: full.slice(0, 2000), steps: 4 })) as any;
     if (!out?.image) return null;
     const bin = Uint8Array.from(atob(out.image), (ch) => ch.charCodeAt(0));
