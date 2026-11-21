@@ -91,6 +91,10 @@ npm run deploy
 2. GM 後台 →「新聞來源」→ 貼上 API Key → 儲存 →「立刻抓新聞」。
 3. 想補充即時新聞，可以在同一頁加 RSS 網址（請使用允許轉載摘要與連結的來源）。
 
+### 更新網站
+
+改了程式之後，雙擊 `update.bat` 就會把新版放上 wootw.com（資料庫、用戶資料都不會動）。
+
 ### 7. 網域 wootw.com
 
 `wrangler.toml` 已經設定好 `wootw.com` 和 `www.wootw.com`（www 會自動轉到 wootw.com），部署時 Cloudflare 會自動建立 DNS 和 SSL 憑證，不用手動設定。
