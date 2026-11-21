@@ -74,7 +74,8 @@ export async function fetchVideos(env: Env, channels: Channel[] = DEFAULT_CHANNE
 /** 依帳號類型挑一部還沒分享過的影片；標題有熱門關鍵字的優先 */
 export async function takeVideo(env: Env, groups: string[], keywords: string[]): Promise<Video | null> {
   const ph = groups.map(() => '?').join(',');
-  const rows = (await env.DB.prepare(`SELECT id, title, channel, grp FROM video_cache WHERE used = 0 AND grp IN (${ph}) ORDER BY published_at DESC LIMIT 30`).bind(...groups).all<Video>()).results;
+  // 同一部影片（或同標題的重複上傳）只分享一次
+  const rows = (await env.DB.prepare(`SELECT id, title, channel, grp FROM video_cache v WHERE used = 0 AND grp IN (${ph}) AND NOT EXISTS (SELECT 1 FROM posts p WHERE p.link_title = v.title OR p.link_url = 'https://www.youtube.com/watch?v=' || v.id) ORDER BY published_at DESC LIMIT 30`).bind(...groups).all<Video>()).results;
   if (!rows.length) return null;
   const hot = rows.filter((v) => keywords.some((k) => k && v.title.toLowerCase().includes(k.toLowerCase())));
   const pool = hot.length && Math.random() < 0.7 ? hot : rows;
