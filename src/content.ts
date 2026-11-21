@@ -243,7 +243,7 @@ const QUICK_JOKE = ['好冷', '冷到結冰', '噗', '可以，這很可以', '�
 
 /**
  * 留言排程：只在 ✦ 貼文底下，由「留言」組帳號輪流留言。
- * 每篇目標 5～50 則（後台可調），隨著時間自然累積（大約 12 小時內留完），每分鐘最多 5 則。
+ * 每篇目標 5～50 則（後台可調），隨著時間自然累積（大約 12 小時內留完），每分鐘最多 12 則。
  * ✦ 帳號絕不在真人的文章底下留言。
  */
 async function runCommentTick(env: Env, s: Record<string, string>) {
@@ -255,11 +255,12 @@ async function runCommentTick(env: Env, s: Record<string, string>) {
     `SELECT p.id, p.text, p.comment_count, p.created_at, p.sensitive, p.user_id FROM posts p JOIN users u ON u.id = p.user_id
      WHERE p.source = 'content' AND u.is_content = 1 AND p.hidden = 0 AND p.kind = 'post' AND p.created_at > ? ORDER BY p.created_at DESC LIMIT 300`
   ).bind(now() - 48 * 3600_000).all<{ id: string; text: string; comment_count: number; created_at: number; sensitive: number; user_id: string }>();
-  const due = posts.results.filter((p) => {
+  // 依「還差幾則」排序，差最多的先留（加一點隨機），每分鐘最多 12 則
+  const due = posts.results.map((p) => {
     const target = commentTarget(p.id, min, max);
     const age = (now() - p.created_at) / (12 * 3600_000);
-    return p.comment_count < Math.floor(target * Math.min(1, Math.sqrt(Math.max(0, age)) + 0.05));
-  }).sort(() => Math.random() - 0.5).slice(0, 5);
+    return { p, gap: Math.floor(target * Math.min(1, Math.sqrt(Math.max(0, age)) + 0.05)) - p.comment_count };
+  }).filter((x) => x.gap > 0).sort((a, b) => b.gap + Math.random() * 3 - (a.gap + Math.random() * 3)).slice(0, 12).map((x) => x.p);
   const model = s.comment_model || '@cf/meta/llama-3.1-8b-instruct-fp8-fast';
   for (const p of due) {
     const a = await env.DB.prepare(
