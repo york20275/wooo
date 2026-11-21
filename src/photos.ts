@@ -144,7 +144,7 @@ async function hasText(env: Env, bin: Uint8Array): Promise<boolean> {
 }
 
 /** 用 AI 生成一張圖存到 R2（不用別人的照片）。圖裡有文字就重畫，兩次都有就不要圖 */
-export async function aiImage(env: Env, prompt: string, folder = 'c', square = false): Promise<string | null> {
+export async function aiImage(env: Env, prompt: string, folder = 'c', square = false, debug?: string[]): Promise<string | null> {
   try {
     const clean = prompt
       .replace(/\b(man|woman|men|women|person|people|guy|girl|boy|kid|child|children|someone|selfie|hand|hands|face|friend|friends|he|she|his|her)\b/gi, '')
@@ -152,17 +152,17 @@ export async function aiImage(env: Env, prompt: string, folder = 'c', square = f
     const full = `${clean}, ${square ? 'cute avatar picture, centered subject, soft plain background' : 'realistic amateur photo, natural lighting, everyday scene, plain solid-colored objects, clean simple background, empty scene without anyone'}`;
     for (let i = 0; i < 2; i++) {
       const out = (await env.AI.run(IMAGE_MODEL as any, { prompt: full.slice(0, 2000), steps: 4, seed: Math.floor(Math.random() * 1e9) })) as any;
-      if (!out?.image) continue;
+      if (!out?.image) { debug?.push('沒有圖'); continue; }
       const bin = Uint8Array.from(atob(out.image), (ch) => ch.charCodeAt(0));
       if (bin.byteLength < 3000) continue;
-      if (await hasText(env, bin)) { console.log('aiImage: 有文字，重畫'); continue; }
+      if (await hasText(env, bin)) { debug?.push('有文字，重畫'); continue; }
       const d = new Date();
       const key = folder === 'c' ? `c/${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${newId()}.jpg` : `${folder}/${newId()}.jpg`;
       await env.IMAGES.put(key, bin, { httpMetadata: { contentType: 'image/jpeg' } });
       return key;
     }
     return null;
-  } catch (e) { console.log('aiImage', String(e)); return null; }
+  } catch (e) { debug?.push(String(e)); console.log('aiImage', String(e)); return null; }
 }
 
 /** 每次幫幾個還沒有頭像的 ✦ 帳號配頭像：約 3 成動物、2 成風景（AI 生成）、5 成卡通人物（不使用任何人的照片） */

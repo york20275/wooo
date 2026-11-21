@@ -338,8 +338,9 @@ admin.get('/text-test', async (c) => {
 });
 
 admin.get('/image-test', async (c) => {
-  const key = await aiImage(c.env, c.req.query('p') || 'messy living room with clothes on the sofa');
-  return c.json({ key, url: key ? `/img/${key}` : null });
+  const debug: string[] = [];
+  const key = await aiImage(c.env, c.req.query('p') || 'messy living room with clothes on the sofa', 'c', false, debug);
+  return c.json({ key, url: key ? `/img/${key}` : null, debug });
 });
 
 admin.post('/content/avatars-now', async (c) => c.json({ done: await assignAvatars(c.env, 5) }));
