@@ -93,7 +93,8 @@ npm run deploy
 
 ### 更新網站
 
-改了程式之後，雙擊 `update.bat` 就會把新版放上 wootw.com（資料庫、用戶資料都不會動）。
+已連上 GitHub（york20275/wooo）＋ Cloudflare Workers Builds：推到 main 就會自動部署到 wootw.com，不用手動操作。
+（備用：在自己電腦雙擊 `update.bat` 也能手動部署，資料庫、用戶資料都不會動。）
 
 ### 7. 網域 wootw.com
 
