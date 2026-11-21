@@ -186,7 +186,7 @@ social.get('/albums/:id', async (c) => {
   const a = await c.env.DB.prepare('SELECT a.*, u.name, u.handle, u.avatar_key, u.is_content, u.status FROM albums a JOIN users u ON u.id = a.user_id WHERE a.id = ?').bind(c.req.param('id')).first<any>();
   if (!a || a.status === 'banned') throw new HttpError(404, '找不到這本相簿');
   const me = c.get('user');
-  if (a.sensitive && !canSeeSensitive(me) && me?.id !== a.user_id) throw new HttpError(403, '這本相簿含敏感內容，需要登入、完成年齡驗證並開啟敏感內容');
+  if (a.sensitive && !canSeeSensitive(me) && me?.id !== a.user_id) throw new HttpError(403, '這本相簿含敏感內容，需要登入、確認年滿 18 歲並開啟敏感內容');
   if (me && await isBlockedEither(c.env.DB, me.id, a.user_id)) throw new HttpError(403, '你無法查看這本相簿');
   const r = await c.env.DB.prepare('SELECT id, image_key, caption, created_at FROM album_photos WHERE album_id = ? ORDER BY created_at').bind(a.id).all();
   return c.json({

@@ -941,7 +941,7 @@ async function settingsPage() {
   const sizeBtn = (on, label) => h('button', { class: `btn small ${on ? '' : 'ghost'}`, onclick: () => { document.documentElement.classList.toggle('large', label === '大'); try { localStorage.setItem('large', label === '大' ? '1' : '0'); } catch {} settingsPage(); } }, label);
 
   const sensitive = h('section', { class: 'card glass' }, h('h2', null, '敏感內容'));
-  if (!S.me) sensitive.append(h('span', { class: 'muted' }, '登入並完成年齡驗證後才能開啟。'));
+  if (!S.me) sensitive.append(h('span', { class: 'muted' }, '登入並確認年滿 18 歲後才能開啟。'));
   else {
     const sw = h('button', { class: 'switch', role: 'switch', 'aria-checked': String(!!S.me.show_sensitive), 'aria-label': '顯示敏感內容' });
     const panel = h('div');
@@ -949,15 +949,14 @@ async function settingsPage() {
       if (S.me.show_sensitive) { await api('PATCH', '/api/me', { show_sensitive: false }); await loadMe(); return settingsPage(); }
       if (S.me.age_verified) { await api('PATCH', '/api/me', { show_sensitive: true }); await loadMe(); return settingsPage(); }
       const err = h('span', { class: 'err' });
-      const verify = async () => { try { await api('POST', '/api/age/verify', { method: 'card' }); await loadMe(); settingsPage(); } catch (e) { err.textContent = e.message; } };
+      const box = h('input', { type: 'checkbox', id: 'adult18' });
+      const go = h('button', { class: 'btn small', disabled: true, onclick: async () => { try { await api('POST', '/api/age/verify', { confirm18: true }); await loadMe(); settingsPage(); } catch (e) { err.textContent = e.message; } } }, '開啟敏感內容');
+      box.addEventListener('change', () => { go.disabled = !box.checked; });
       panel.replaceChildren(h('div', { class: 'notice' },
-        h('b', { style: 'font-family:var(--round)' }, '需要先完成年齡驗證'),
-        h('span', { style: 'font-size:14px' }, '依台灣法規，觀看敏感內容前必須確認你已年滿 18 歲，自己填生日不算數。'),
-        h('div', { class: 'row wrap' }, h('button', { class: 'btn small', onclick: verify }, '信用卡驗證'), h('button', { class: 'btn ghost small', onclick: verify }, '身分證件驗證'), h('button', { class: 'icon-btn', onclick: () => panel.replaceChildren() }, '取消')),
-        err, h('span', { class: 'muted' }, '驗證由第三方服務處理，窩Woo！只記錄「已滿 18 歲」的結果，不保存卡號或證件影像。')));
+        h('label', { class: 'row', for: 'adult18', style: 'gap:8px;cursor:pointer' }, box, h('span', null, '我已年滿 18 歲，願意觀看敏感內容')),
+        h('div', { class: 'row wrap' }, go, h('button', { class: 'icon-btn', onclick: () => panel.replaceChildren() }, '取消')), err));
     });
-    sensitive.append(h('div', { class: 'row between' }, h('span', null, h('span', null, '顯示敏感內容'), h('br'), h('span', { class: 'muted' }, '開啟後，被標記為敏感的貼文會先模糊顯示，點擊才會看到。未滿 18 歲或未完成驗證的帳號永遠看不到。')), sw), panel,
-      S.me.age_verified ? h('span', { class: 'ok' }, '✓ 已完成年齡驗證（18 歲以上）') : null);
+    sensitive.append(h('div', { class: 'row between' }, h('span', null, h('span', null, '顯示敏感內容'), h('br'), h('span', { class: 'muted' }, '開啟後，被標記為敏感的貼文會先模糊顯示，點擊才會看到。僅限年滿 18 歲。')), sw), panel);
   }
 
   const notifySec = h('section', { class: 'card glass' }, h('h2', null, '通知與 App'));
@@ -1072,12 +1071,12 @@ function legalPage(title, sections) {
 function privacyPage() {
   legalPage('隱私權政策', [
     ['一、誰負責保護你的資料', '窩Woo！（以下稱「本平台」）由 [營運者名稱] 經營。對個人資料有任何問題，請來信 [聯絡 Email]。'],
-    ['二、我們蒐集哪些資料', ['Google 帳號提供的姓名、Email 與帳號識別碼（用於登入）。', '你主動提供的內容：個人資料、文章、網誌、相簿、留言、私訊、檢舉內容。', '使用紀錄：登入時間、瀏覽個人頁的訪客統計（未登入者僅保存經雜湊處理的識別值，兩天後刪除）。', '年齡驗證結果：只保存「是否已滿 18 歲」，不保存卡號或證件影像。', '推播通知訂閱資訊（你開啟推播時）。']],
+    ['二、我們蒐集哪些資料', ['Google 帳號提供的姓名、Email 與帳號識別碼（用於登入）。', '你主動提供的內容：個人資料、文章、網誌、相簿、留言、私訊、檢舉內容。', '使用紀錄：登入時間、瀏覽個人頁的訪客統計（未登入者僅保存經雜湊處理的識別值，兩天後刪除）。', '年齡確認：只保存你是否已確認年滿 18 歲。', '推播通知訂閱資訊（你開啟推播時）。']],
     ['三、蒐集目的與使用方式', '提供社群服務、帳號管理、通知、內容審核與檢舉處理、防止濫用與詐騙、統計分析與服務改善。我們不會販售你的個人資料。'],
     ['四、資料保存與處理地點', '資料保存在 Cloudflare 提供的雲端服務（資料庫與圖片儲存），可能位於台灣以外的地區。時事內容的 AI 摘要由 Cloudflare Workers AI 處理，不會傳送你的個人資料。'],
     ['五、你的權利', '依個人資料保護法，你可以查詢、閱覽、取得副本、補充更正、要求停止蒐集處理利用，或要求刪除你的個人資料。你可以在「設定 → 帳號與隱私」直接下載你的資料或刪除帳號，其他請求請來信 [聯絡 Email]。'],
     ['六、Cookie', '本平台只使用維持登入狀態所必需的 Cookie，以及儲存你在本機選擇的外觀設定，不使用廣告追蹤 Cookie。'],
-    ['七、未成年人', '敏感內容僅限完成年齡驗證、年滿 18 歲的用戶開啟。未滿 18 歲的用戶請在法定代理人同意下使用本平台。'],
+    ['七、未成年人', '敏感內容僅限確認年滿 18 歲的用戶開啟。未滿 18 歲的用戶請在法定代理人同意下使用本平台。'],
     ['八、政策修改', '本政策修改時會在本頁公告，重大變更會另以站內通知告知。'],
   ]);
 }
@@ -1087,7 +1086,7 @@ function termsPage() {
     ['二、帳號', ['你必須使用自己的 Google 帳號登入，並對帳號下的所有行為負責。', '不得冒用他人身分、買賣或轉讓帳號。']],
     ['三、你的內容', '你保有自己發布內容的著作權，但同意授權本平台在提供服務的範圍內儲存、顯示與傳輸這些內容。你保證發布的內容不侵害他人權利。'],
     ['四、禁止行為', ['涉及未成年的性相關內容（包含繪圖與 AI 生成）、未經同意的私密影像、暴力或性虐待內容。', '騷擾、仇恨、詐騙、垃圾訊息、惡意程式、侵害著作權或隱私。', '未標記的敏感內容、在大頭貼或橫幅使用敏感內容。', '以自動化方式大量註冊、發文或擷取資料。']],
-    ['五、敏感內容', '敏感內容須由發文者標記，且僅提供給完成年齡驗證、年滿 18 歲並自行開啟的用戶觀看。'],
+    ['五、敏感內容', '敏感內容須由發文者標記，且僅提供給確認年滿 18 歲並自行開啟的用戶觀看。'],
     ['六、✦ 平台內容帳號', '標示 ✦ 的帳號為本平台自動發布內容的帳號，時事摘要僅供參考，請以原始新聞來源為準。'],
     ['七、處置', '違反本條款或法律時，本平台得不經通知移除內容、停權或刪除帳號，並於必要時配合司法機關調查。'],
     ['八、免責', '本平台依現狀提供服務，不保證服務不中斷或無錯誤。用戶之間的互動與發布內容由發布者自行負責。'],

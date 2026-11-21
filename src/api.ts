@@ -276,24 +276,20 @@ api.patch('/me', async (c) => {
     sets.push('pinned_post_id = ?'); vals.push(b.pinned_post_id);
   }
   if (typeof b.show_sensitive === 'boolean') {
-    if (b.show_sensitive && !u.age_verified) throw new HttpError(403, '需要先完成年齡驗證');
+    if (b.show_sensitive && !u.age_verified) throw new HttpError(403, '需要先確認年滿 18 歲');
     sets.push('show_sensitive = ?'); vals.push(b.show_sensitive ? 1 : 0);
   }
   if (sets.length) await c.env.DB.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).bind(...vals, u.id).run();
   return c.json({ ok: true });
 });
 
-/**
- * 年齡驗證。正式上線前必須串接第三方驗證服務（信用卡或身分證件），
- * 由服務商回傳「已滿 18 歲」的結果後才把 age_verified 設為 1。只保存結果，不保存卡號或證件影像。
- */
+/** 年齡確認：用戶自己勾選「我已年滿 18 歲」後才能開啟敏感內容（記錄確認時間） */
 api.post('/age/verify', async (c) => {
   const u = requireUser(c);
-  if (c.env.DEV_MODE === '1') {
-    await c.env.DB.prepare('UPDATE users SET age_verified = 1, show_sensitive = 1 WHERE id = ?').bind(u.id).run();
-    return c.json({ ok: true, dev: true });
-  }
-  throw new HttpError(501, '年齡驗證服務尚未開通，敏感內容暫時無法開啟');
+  const b = await c.req.json<any>().catch(() => ({}));
+  if (b.confirm18 !== true) throw new HttpError(400, '請先勾選「我已年滿 18 歲」');
+  await c.env.DB.prepare('UPDATE users SET age_verified = 1, show_sensitive = 1 WHERE id = ?').bind(u.id).run();
+  return c.json({ ok: true });
 });
 
 /** 人機驗證（Cloudflare Turnstile） */

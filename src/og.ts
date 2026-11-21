@@ -13,7 +13,7 @@ async function metaFor(env: Env, path: string): Promise<Meta | null> {
       "SELECT p.text, p.title, p.kind, p.image_key, p.sensitive, p.created_at, p.like_count, p.comment_count, u.name, u.is_content FROM posts p JOIN users u ON u.id = p.user_id WHERE p.id = ? AND p.hidden = 0 AND u.status != 'banned'"
     ).bind(m[1]).first<any>();
     if (!p) return null;
-    if (p.sensitive) return { title: `${p.name} 在窩Woo！`, description: '這篇文章含敏感內容，需登入並完成年齡驗證才能查看。', image: null, type: 'article' };
+    if (p.sensitive) return { title: `${p.name} 在窩Woo！`, description: '這篇文章含敏感內容，需登入並確認年滿 18 歲才能查看。', image: null, type: 'article' };
     const title = p.kind === 'blog' && p.title ? `${p.title}｜${p.name}` : `${p.name}${p.is_content ? ' ✦' : ''} 在窩Woo！`;
     return {
       title,

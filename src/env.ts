@@ -87,7 +87,7 @@ export async function logContent(db: D1Database, kind: string, accountId: string
   await db.prepare('INSERT INTO content_log (id, kind, account_id, detail, created_at) VALUES (?, ?, ?, ?, ?)').bind(newId(), kind, accountId, detail.slice(0, 500), now()).run();
 }
 
-/** 這位觀看者能不能看敏感內容：必須登入、已完成年齡驗證、並自己開啟 */
+/** 這位觀看者能不能看敏感內容：必須登入、已確認年滿 18 歲、並自己開啟 */
 export function canSeeSensitive(u: User | null): boolean {
   return !!u && u.age_verified === 1 && u.show_sensitive === 1;
 }
