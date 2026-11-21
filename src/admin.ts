@@ -316,6 +316,14 @@ admin.post('/content/seed-commenters', async (c) => {
   return c.json({ added });
 });
 
+admin.get('/text-test', async (c) => {
+  const obj = await c.env.IMAGES.get(c.req.query('k') || '');
+  if (!obj) return c.json({ error: 'not found' });
+  const bin = new Uint8Array(await obj.arrayBuffer());
+  const r = (await c.env.AI.run('@cf/llava-hf/llava-1.5-7b-hf' as any, { image: [...bin], prompt: 'Is there any visible text, letters, characters, numbers, logo or watermark anywhere in this image, even small or blurry? Answer only yes or no.', max_tokens: 5 })) as any;
+  return c.json(r);
+});
+
 admin.get('/image-test', async (c) => {
   const key = await aiImage(c.env, c.req.query('p') || 'messy living room with clothes on the sofa');
   return c.json({ key, url: key ? `/img/${key}` : null });

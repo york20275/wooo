@@ -128,18 +128,36 @@ async function openverseSquare(query: string) {
 export const IMAGE_MODEL = '@cf/black-forest-labs/flux-1-schnell';
 
 /** 用 AI 生成一張圖存到 R2（不用別人的照片）。失敗就回傳 null */
+/** 容易帶出文字的東西（包裝、招牌、書、螢幕…），從畫面描述裡拿掉或換成沒有字的版本 */
+const TEXTY = /\b(text|letters?|words?|sign|signs|signboard|label|labels|logo|logos|brand|branded|package|packages|packaging|box|boxes|carton|bag of \w+|snack bags?|menu|poster|book|books|newspaper|magazine|receipt|ticket|screen|monitor|phone|smartphone|tv|television|computer|laptop|keyboard|watermark|caption|subtitle)\b/gi;
+
+/** 用視覺模型檢查圖裡有沒有任何文字（AI 圖常出現亂碼字） */
+async function hasText(env: Env, bin: Uint8Array): Promise<boolean> {
+  try {
+    const r = (await env.AI.run('@cf/llava-hf/llava-1.5-7b-hf' as any, { image: [...bin], prompt: 'Is there any visible text, letters, characters, numbers, logo or watermark anywhere in this image, even small or blurry? Answer only yes or no.', max_tokens: 5 })) as any;
+    return /yes/i.test(String(r?.description || r?.response || ''));
+  } catch { return false; }
+}
+
+/** 用 AI 生成一張圖存到 R2（不用別人的照片）。圖裡有文字就重畫，兩次都有就不要圖 */
 export async function aiImage(env: Env, prompt: string, folder = 'c', square = false): Promise<string | null> {
   try {
-    const clean = prompt.replace(/\b(man|woman|men|women|person|people|guy|girl|boy|kid|child|children|someone|selfie|hand|hands|face|friend|friends|he|she|his|her)\b/gi, '').replace(/\s+/g, ' ');
-    const full = `${clean}, ${square ? 'cute avatar picture, centered subject, soft background' : 'realistic amateur photo, natural lighting, everyday scene, no people, no person, no hands, no face, no phone in frame, plain unbranded packaging'}, no text, no letters, no watermark, no logo`;
-    const out = (await env.AI.run(IMAGE_MODEL as any, { prompt: full.slice(0, 2000), steps: 4 })) as any;
-    if (!out?.image) return null;
-    const bin = Uint8Array.from(atob(out.image), (ch) => ch.charCodeAt(0));
-    if (bin.byteLength < 3000) return null;
-    const d = new Date();
-    const key = folder === 'c' ? `c/${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${newId()}.jpg` : `${folder}/${newId()}.jpg`;
-    await env.IMAGES.put(key, bin, { httpMetadata: { contentType: 'image/jpeg' } });
-    return key;
+    const clean = prompt
+      .replace(/\b(man|woman|men|women|person|people|guy|girl|boy|kid|child|children|someone|selfie|hand|hands|face|friend|friends|he|she|his|her)\b/gi, '')
+      .replace(/\bgame controller\b/gi, 'gamepad').replace(TEXTY, '').replace(/\s+/g, ' ').replace(/(,\s*)+/g, ', ').trim();
+    const full = `${clean}, ${square ? 'cute avatar picture, centered subject, soft plain background' : 'realistic amateur photo, natural lighting, everyday scene, plain solid-colored objects, clean simple background, empty scene without anyone'}`;
+    for (let i = 0; i < 2; i++) {
+      const out = (await env.AI.run(IMAGE_MODEL as any, { prompt: full.slice(0, 2000), steps: 4, seed: Math.floor(Math.random() * 1e9) })) as any;
+      if (!out?.image) continue;
+      const bin = Uint8Array.from(atob(out.image), (ch) => ch.charCodeAt(0));
+      if (bin.byteLength < 3000) continue;
+      if (await hasText(env, bin)) { console.log('aiImage: 有文字，重畫'); continue; }
+      const d = new Date();
+      const key = folder === 'c' ? `c/${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${newId()}.jpg` : `${folder}/${newId()}.jpg`;
+      await env.IMAGES.put(key, bin, { httpMetadata: { contentType: 'image/jpeg' } });
+      return key;
+    }
+    return null;
   } catch (e) { console.log('aiImage', String(e)); return null; }
 }
 

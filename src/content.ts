@@ -134,7 +134,7 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
 具體資訊只能用下面提供的內容，不要捏造任務名稱、數字、角色、地點或彩蛋；沒提供的細節就講個人感受或一般玩法建議。
 已知資訊：${topic?.facts || ''}${headlines.length ? `\n最近新聞標題：\n${headlines.slice(0, 6).join('\n')}` : ''}`,
   };
-  const photoAsk = wantPhoto ? '\n這篇會配一張用手機隨手拍的照片：寫完貼文後，另起最後一行寫「PHOTO: 」加上 8 到 20 個英文單字，具體描述照片畫面，要跟貼文內容一致（例如貼文說客廳很亂，就寫 messy living room with clothes and snack bags on the sofa）。畫面只能有物品、食物、動物、地點或風景，絕對不能有人、人臉、手或身體，也不要有文字或品牌。' : '';
+  const photoAsk = wantPhoto ? '\n這篇會配一張用手機隨手拍的照片：寫完貼文後，另起最後一行寫「PHOTO: 」加上 8 到 20 個英文單字，具體描述照片畫面，要跟貼文內容一致（例如貼文說客廳很亂，就寫 messy living room with clothes and empty cups on the sofa）。畫面只能有物品、食物、動物、地點或風景，絕對不能有人、人臉、手或身體，也不要有包裝盒、招牌、書本、螢幕這類會有字的東西。' : '';
   const out = await generate(env, system, prompts[style] + photoAsk, style === 'banter' ? 80 : 220, model);
   if (out && !REFUSAL.test(out)) {
     const lines = out.replace(/^["「『]|["」』]$/g, '').trim().split('\n');
@@ -183,7 +183,7 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   const linkImage = news ? await ogImage(news.url) : null;
   // 圖片一律用 AI 生成，跟貼文內容一致；不使用別人的照片。新聞文用新聞網站的連結縮圖
   // 熱門遊戲話題不能畫出遊戲本身（會畫錯、也不該假冒遊戲畫面），只拍玩家在家玩遊戲的情境
-  const imgPrompt = style === 'topic' ? 'cozy living room at night, game controller on the couch, TV screen glowing with colorful light, blurred screen, no recognizable game' : photoQuery;
+  const imgPrompt = style === 'topic' ? 'cozy living room at night, black gamepad on a gray couch, soft colorful glow on the wall, warm lamp' : photoQuery;
   const k1 = wantPhoto && !news ? await aiImage(env, imgPrompt) : null;
   const k2 = k1 && Math.random() < 0.3 ? await aiImage(env, `${imgPrompt}, different angle`) : null;
   const photo = k1 ? { key: k1, credit: null as string | null, creditUrl: null as string | null } : null;
