@@ -199,7 +199,8 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   if (style === 'adult') board = boards.find((b) => b.id === 'cm_free') || board;
   // 笑話、幹話也配圖（梗圖感的相關照片）；成人梗不配圖
   // 大約 7 成的文附 1～2 張照片（成人梗不配圖，所以其他類型的比例再拉高一點補回來）
-  const wantPhoto = style !== 'adult' && Math.random() * 100 < Math.min(100, photoRatio * 1.12);
+  // 熱門話題（GTA6、黃仁勳、台股）不配 AI 圖：畫出來的主機、手把、人物都會跟事實不符
+  const wantPhoto = style !== 'adult' && style !== 'topic' && Math.random() * 100 < Math.min(100, photoRatio * 1.25);
   const raw = await writePost(env, model, a, news, wantPhoto, board, style, topic, headlines);
   if (!raw) {
     await toBack.run();
