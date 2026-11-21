@@ -20,7 +20,7 @@ run_worker_first = ["/api/*", "/auth/*", "/img/*", "/p/*", "/u/*", "/album/*", "
 [[d1_databases]]
 binding = "DB"
 database_name = "wooo-db"
-database_id = "請換成 wrangler d1 create 產生的 ID"
+database_id = "5c4b35d1-3bc5-4322-b050-78888b521c2c"
 
 [[r2_buckets]]
 binding = "IMAGES"
@@ -38,13 +38,13 @@ SITE_NAME = "窩Woo！"
 # 網站網址（Google 登入回呼、分享連結用），不要結尾斜線
 SITE_URL = "https://wootw.com"
 # GM 管理員的 Gmail，多個用逗號分隔
-GM_EMAILS = ""
+GM_EMAILS = "york20275@gmail.com"
 # Workers AI 模型
 AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 # Cloudflare Turnstile 人機驗證的 Site Key（選用；搭配 secret TURNSTILE_SECRET）
 TURNSTILE_SITEKEY = ""
 # 推播通知的聯絡信箱（VAPID），例如 mailto:you@gmail.com
-VAPID_SUBJECT = ""
+VAPID_SUBJECT = "mailto:york20275@gmail.com"
 # 本機測試用：1 = 開啟免 Google 的測試登入與測試年齡驗證。正式上線一定要是 0
 DEV_MODE = "0"
 
