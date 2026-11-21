@@ -363,7 +363,7 @@ admin.post('/content/share-url', async (c) => {
 
 admin.post('/content/issue-poll', async (c) => c.json(await runIssuePoll(c.env, true)));
 
-admin.post('/content/fetch-videos', async (c) => c.json({ added: await fetchVideos(c.env) }));
+admin.post('/content/fetch-videos', async (c) => { const report: string[] = []; const added = await fetchVideos(c.env, undefined, report); return c.json({ added, report }); });
 
 admin.get('/server', async (c) => c.json(await serverStats(c.env)));
 

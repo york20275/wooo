@@ -34,12 +34,12 @@ function decode(s: string) {
 }
 
 /** 每 30 分鐘抓一次各頻道最新影片，存進 video_cache（同一部影片只存一次） */
-export async function fetchVideos(env: Env, channels: Channel[] = DEFAULT_CHANNELS) {
+export async function fetchVideos(env: Env, channels: Channel[] = DEFAULT_CHANNELS, report?: string[]) {
   let added = 0;
   for (const ch of channels) {
     try {
       const r = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${ch.id}`, { headers: { 'User-Agent': 'WooBot/1.0 (+https://wootw.com)' } });
-      if (!r.ok) continue;
+      if (!r.ok) { report?.push(`${ch.name}: HTTP ${r.status}`); continue; }
       const xml = await r.text();
       const entries = xml.split('<entry>').slice(1, 8);
       const stmts = entries.map((e) => {
@@ -50,8 +50,10 @@ export async function fetchVideos(env: Env, channels: Channel[] = DEFAULT_CHANNE
         if (!id || !title || /#shorts/i.test(title) || now() - pub > 5 * 86400_000) return null;
         return env.DB.prepare('INSERT OR IGNORE INTO video_cache (id, title, channel, grp, published_at, fetched_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id, title.slice(0, 200), ch.name, ch.group, pub, now());
       }).filter(Boolean) as D1PreparedStatement[];
-      if (stmts.length) { const res = await env.DB.batch(stmts); added += res.reduce((n, x) => n + (x.meta.changes || 0), 0); }
-    } catch (e) { console.log('fetchVideos', ch.name, String(e)); }
+      let got = 0;
+      if (stmts.length) { const res = await env.DB.batch(stmts); got = res.reduce((n, x) => n + (x.meta.changes || 0), 0); added += got; }
+      report?.push(`${ch.name}: ${entries.length} 部、可用 ${stmts.length}、新增 ${got}`);
+    } catch (e) { report?.push(`${ch.name}: ${String(e)}`); console.log('fetchVideos', ch.name, String(e)); }
   }
   await env.DB.prepare('DELETE FROM video_cache WHERE fetched_at < ?').bind(now() - 10 * 86400_000).run();
   return added;
