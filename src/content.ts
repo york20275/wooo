@@ -69,6 +69,28 @@ function chooseStyle(s: Record<string, string>, a: Account): { style: Style; top
 
 const REFUSAL = /抱歉|對不起，我|我無法|我不能|無法提供|不適合提供|作為(一個)?(AI|人工智慧|語言模型)|AI 助理/;
 
+/** 常見錯字（模型偶爾寫出的異體字或形近字） */
+const TYPOS: [RegExp, string][] = [[/倒楉|倒霉/g, '倒楣'], [/重來沒/g, '從來沒'], [/在也不/g, '再也不'], [/因該/g, '應該'], [/以經/g, '已經'], [/真的假的阿/g, '真的假的啊']];
+function fixTypos(t: string) { return TYPOS.reduce((s, [re, to]) => s.replace(re, to), t); }
+
+/** 發文前再檢查一次：不合常理就不發；合理就只修錯字。短文（幹話）不檢查以節省用量 */
+async function reviewPost(env: Env, model: string, text: string): Promise<string | null> {
+  if ([...text].length <= 30) return text;
+  const out = await generate(env, '你是台灣社群網站的文字編輯，用繁體中文，只輸出結果，不要解釋。', `檢查下面這則貼文：
+1. 情節是否合乎常理（例如：吃漢堡本來就用手，不會需要叉子或筷子；不會有像犯罪或被困住的情節；前後不能矛盾）。
+2. 有沒有錯字或不自然的用詞。
+如果情節不合理，只回覆「NO」。
+如果合理，回覆修正錯字後的全文（只修錯字和不通順的地方，不要改內容、不要加字、不要加引號）。
+
+貼文：
+${text}`, 260, model);
+  if (!out) return text;
+  const r = out.trim().replace(/^["「『]|["」』]$/g, '');
+  if (/^NO\b|^「?NO」?$|不合理/i.test(r)) return null;
+  if ([...r].length < [...text].length * 0.5 || [...r].length > [...text].length * 1.5) return text; // 編輯改太多就用原文
+  return fixTypos(r);
+}
+
 async function writePost(env: Env, model: string, a: Account, news: NewsItem | null, wantPhoto = false, board: Board | null = null, style: Style = 'normal', topic: HotTopic | null = null, headlines: string[] = []): Promise<string | null> {
   const boardLine = board && !news && style !== 'topic' ? `\n這篇發在「${board.name}」分類版（${board.description || board.name}），內容跟這個版有關，但保持你的說話風格。` : '';
   const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。${boardLine}`;
@@ -80,13 +102,13 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
     const out = await generate(env, system, prompt, 260, model);
     return out ?? `【新聞重點】\n${news.title}`;
   }
-  const when = `現在是${twNow()}。`;
+  const when = `現在是${twNow()}（只是讓你知道時間，不要在開頭寫星期幾或幾點）。`;
   const prompts: Record<Style, string> = {
     banter: `${when}隨手發一句幹話或廢文，像滑手機時打的碎念：5 到 25 個字，可以很無厘頭、厭世或自嘲，不要 hashtag，不要解釋。`,
     joke: `${when}講一個很短的笑話、冷笑話或諧音梗，20 到 60 個字，最後一句是笑點，不要解釋笑點。`,
     adult: `${when}寫一個成年人看得懂的黃色梗或雙關笑話，靠諧音、雙關或暗示讓人會心一笑，20 到 60 個字。不能有露骨的性描寫，只能涉及成年人，不要解釋。`,
     normal: a.content_group === 'fun'
-      ? `${when}寫一則好笑的生活小事，1 到 3 句話、20 到 80 個字，最後要有笑點或反轉，可以是虛構情境，不要提到真實人名、店名或品牌。`
+      ? `${when}寫一則好笑的生活小事，1 到 3 句話、20 到 80 個字。要是真實生活中會發生、大家看了會說「我也是」的事，不要為了反轉硬編不合理的情節。不要提到真實人名、店名或品牌。`
       : `${when}依照你的主題與個性，寫一則簡短的社群貼文，1 到 3 句話、20 到 80 個字，可以問大家一個輕鬆的問題。`,
     topic: `${when}最近大家都在聊「${topic?.name}」。用玩家的口吻發一則貼文，可以是心得、吐槽、期待、新手建議或問大家問題，20 到 100 個字，可以加 #${(topic?.name || '').replace(/\s+/g, '')}。
 具體資訊只能用下面提供的內容，不要捏造任務名稱、數字、角色、地點或彩蛋；沒提供的細節就講個人感受或一般玩法建議。
@@ -94,7 +116,13 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
   };
   const photoAsk = wantPhoto ? '\n這篇會配一張照片：寫完貼文後，另起最後一行寫「PHOTO: 」加上 2 到 4 個英文單字，描述適合搭配的照片場景或物品（不要人物）。如果是笑話或幹話，就挑跟笑點有關、看了會心一笑的東西或動物，例如 big handbag、sleepy cat。' : '';
   const out = await generate(env, system, prompts[style] + photoAsk, style === 'banter' ? 80 : 220, model);
-  if (out && !REFUSAL.test(out)) return out.replace(/^["「『]|["」』]$/g, '').trim();
+  if (out && !REFUSAL.test(out)) {
+    const lines = out.replace(/^["「『]|["」』]$/g, '').trim().split('\n');
+    const photoLine = /^PHOTO\s*[:：]/i.test(lines[lines.length - 1] || '') ? lines.pop()! : '';
+    const checked = await reviewPost(env, model, fixTypos(lines.join('\n').trim()));
+    if (!checked) return null;
+    return photoLine ? `${checked}\n${photoLine}` : checked;
+  }
   if (out) return null;
   if (env.DEV_MODE !== '1') return null; // 正式環境 AI 失敗就不發，避免重複的罐頭文
   return pick(style === 'banter' ? ['好想下班', '今天也是廢廢的一天', '肚子餓到可以吃下一頭牛'] : style === 'joke' ? ['為什麼海很鹹？因為魚在裡面流汗。'] : [`${twNow()}，又是想窩著什麼都不做的時刻。大家現在在做什麼？`]);
