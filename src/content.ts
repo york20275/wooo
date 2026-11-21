@@ -270,6 +270,8 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   }
   const { style, topic } = news ? { style: 'normal' as Style, topic: null } : chooseStyle(s, a);
   let board = chooseBoard(boards, a, !!news);
+  if (news && POLITICAL.test(news.title + (news.description || ''))) board = boards.find((b) => b.name === '政治議題') || board;
+  else if (news && ENT.test(news.title + (news.description || ''))) board = boards.find((b) => b.name === '追星娛樂') || board;
   let headlines: string[] = [];
   if (style === 'topic' && topic) {
     board = (topic.board === 'news' ? boards.find((b) => b.content_group === 'news') : topic.board === 'ent' ? boards.find((b) => b.name === '追星娛樂') : boards.find((b) => b.content_group === 'game')) || board;
