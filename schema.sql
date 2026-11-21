@@ -126,6 +126,17 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+-- ✦ 帳號分享影片用：各頻道最新影片
+CREATE TABLE IF NOT EXISTS video_cache (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  channel TEXT,
+  grp TEXT,
+  published_at INTEGER,
+  fetched_at INTEGER NOT NULL,
+  used INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS news_cache (
   url TEXT PRIMARY KEY,
   title TEXT NOT NULL,

@@ -305,6 +305,18 @@ function trackView(el, id) {
   VIEWS.io.observe(el);
 }
 
+/** YouTube 影片卡：先顯示縮圖，點了才載入播放器（省流量） */
+function ytCard(link) {
+  const vid = (link.url.match(/[?&]v=([\w-]{11})/) || [])[1];
+  const box = h('div', { class: 'ytcard' });
+  const play = h('button', { class: 'ytthumb', 'aria-label': `播放影片：${link.title}`, onclick: (e) => {
+    e.stopPropagation();
+    play.replaceWith(h('iframe', { class: 'ytframe', src: `https://www.youtube-nocookie.com/embed/${vid}?autoplay=1&rel=0`, title: link.title, allow: 'accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture', allowfullscreen: true, referrerpolicy: 'strict-origin-when-cross-origin' }));
+  } }, h('img', { src: `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`, alt: '', loading: 'lazy' }), h('span', { class: 'ytplay', 'aria-hidden': 'true' }, '▶'));
+  box.append(play, h('a', { class: 'ltext', href: link.url, target: '_blank', rel: 'noopener nofollow', onclick: (e) => e.stopPropagation() }, h('small', null, link.site || 'YouTube'), h('b', null, link.title)));
+  return box;
+}
+
 function postCard(p, { onDelete, full = false, pinned = false } = {}) {
   const el = h('article', { class: 'post glass' });
   const likeBtn = reactionControl(p);
@@ -362,7 +374,7 @@ function postCard(p, { onDelete, full = false, pinned = false } = {}) {
         p.community ? h('a', { class: 'cchip', href: `/c/${p.community.slug}` }, `${p.community.icon} ${p.community.name}`) : null),
       isBlog ? h(full ? 'h1' : 'a', { class: 'blogtitle', href: full ? null : `/p/${p.id}` }, p.title) : null,
       textEl, more,
-      p.link ? h('a', { class: `linkcard${p.link.image ? ' has-img' : ''}`, href: p.link.url, target: '_blank', rel: 'noopener nofollow' }, p.link.image ? h('img', { class: 'lthumb', src: p.link.image, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.remove(); } }) : null, h('div', { class: 'ltext' }, h('small', null, p.link.site || '新聞來源'), h('b', null, p.link.title || p.link.url))) : null,
+      p.link && /youtube\.com\/watch\?v=/.test(p.link.url) ? ytCard(p.link) : p.link ? h('a', { class: `linkcard${p.link.image ? ' has-img' : ''}`, href: p.link.url, target: '_blank', rel: 'noopener nofollow' }, p.link.image ? h('img', { class: 'lthumb', src: p.link.image, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.remove(); } }) : null, h('div', { class: 'ltext' }, h('small', null, p.link.site || '新聞來源'), h('b', null, p.link.title || p.link.url))) : null,
       p.poll ? pollBox(p) : null,
       media,
       p.quote ? quoteCard(p.quote) : null,

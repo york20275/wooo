@@ -6,6 +6,7 @@ import { runDailyPoll } from './features';
 import { aiImage, assignAvatars, findPhoto } from './photos';
 import { migrate } from './migrate';
 import { serverStats } from './monitor';
+import { fetchVideos } from './videos';
 import { HttpError, deletePost } from './api';
 import { deleteUserData } from './social';
 import { runPostTick, fetchNews, dailyPosts, seedCommenters } from './content';
@@ -207,7 +208,7 @@ admin.patch('/content/:id', async (c) => {
 });
 
 const EDITABLE = ['content_enabled', 'daily_posts', 'interact_like', 'interact_comment', 'old_posts_mode',
-  'group_news', 'group_game', 'group_mixed', 'group_fun', 'paused_until', 'newsdata_key', 'rss_feeds', 'feed_content_ratio', 'ai_model', 'photo_ratio', 'pexels_key', 'pixabay_key', 'community_ratio', 'daily_poll', 'adult_ratio', 'comment_min', 'comment_max', 'comment_model', 'group_commenter', 'hot_topics', 'cf_plan'];
+  'group_news', 'group_game', 'group_mixed', 'group_fun', 'paused_until', 'newsdata_key', 'rss_feeds', 'feed_content_ratio', 'ai_model', 'photo_ratio', 'pexels_key', 'pixabay_key', 'community_ratio', 'daily_poll', 'adult_ratio', 'comment_min', 'comment_max', 'comment_model', 'group_commenter', 'hot_topics', 'cf_plan', 'video_ratio'];
 export const AI_MODELS = ['', '@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct-fp8-fast', '@cf/meta/llama-4-scout-17b-16e-instruct'];
 admin.patch('/settings', async (c) => {
   const b = await c.req.json<Record<string, any>>();
@@ -217,9 +218,10 @@ admin.patch('/settings', async (c) => {
     if (k === 'adult_ratio' && !(Number(val) >= 0 && Number(val) <= 40)) continue;
     if ((k === 'comment_min' || k === 'comment_max') && !(Number(val) >= 0 && Number(val) <= 200)) continue;
     if (k === 'comment_model' && !AI_MODELS.includes(val)) continue;
+    if (k === 'video_ratio' && !(Number(val) >= 0 && Number(val) <= 60)) continue;
     if (k === 'cf_plan' && !['free', 'paid'].includes(val)) continue;
     if (k === 'hot_topics') {
-      const list = (Array.isArray(v) ? v : []).slice(0, 10).map((t: any) => ({ name: String(t.name || '').trim().slice(0, 30), facts: String(t.facts || '').slice(0, 1500), ratio: Math.max(0, Math.min(100, Number(t.ratio) || 0)), groups: (Array.isArray(t.groups) ? t.groups : ['game']).filter((g: string) => ['news', 'game', 'mixed', 'fun'].includes(g)) })).filter((t: any) => t.name);
+      const list = (Array.isArray(v) ? v : []).slice(0, 10).map((t: any) => ({ name: String(t.name || '').trim().slice(0, 30), facts: String(t.facts || '').slice(0, 1500), ratio: Math.max(0, Math.min(100, Number(t.ratio) || 0)), groups: (Array.isArray(t.groups) ? t.groups : ['game']).filter((g: string) => ['news', 'game', 'mixed', 'fun'].includes(g)), board: t.board === 'news' ? 'news' : 'game', keyword: String(t.keyword || '').slice(0, 20) })).filter((t: any) => t.name);
       val = JSON.stringify(list);
     }
     if (k === 'community_ratio' && !(Number(val) >= 0 && Number(val) <= 100)) continue;
@@ -346,6 +348,8 @@ admin.get('/image-test', async (c) => {
 admin.post('/content/avatars-now', async (c) => c.json({ done: await assignAvatars(c.env, 5) }));
 
 admin.post('/migrate', async (c) => c.json({ applied: await migrate(c.env) }));
+
+admin.post('/content/fetch-videos', async (c) => c.json({ added: await fetchVideos(c.env) }));
 
 admin.get('/server', async (c) => c.json(await serverStats(c.env)));
 

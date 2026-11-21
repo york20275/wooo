@@ -6,6 +6,7 @@ import { addComment, addLike } from './api';
 import { aiImage, assignAvatars, splitPhotoLine, topicQuery } from './photos';
 import { cleanupStories, runDailyPoll } from './features';
 import { migrate } from './migrate';
+import { fetchVideos, takeVideo, type Video } from './videos';
 
 export const fetchNews = fetchNewsImpl;
 export const GROUPS = ['news', 'game', 'mixed', 'fun'] as const;
@@ -46,7 +47,7 @@ function chooseBoard(boards: Board[], a: Account, isNews: boolean): Board | null
 }
 
 type Style = 'banter' | 'joke' | 'adult' | 'normal' | 'topic' | 'ask' | 'observe';
-interface HotTopic { name: string; facts: string; ratio: number; groups?: string[] }
+interface HotTopic { name: string; facts: string; ratio: number; groups?: string[]; board?: 'game' | 'news'; keyword?: string }
 
 export function hotTopics(s: Record<string, string>): HotTopic[] {
   try { const t = JSON.parse(s.hot_topics || '[]'); return Array.isArray(t) ? t.filter((x) => x && x.name) : []; } catch { return []; }
@@ -131,7 +132,7 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
     // 脆爆紅的手法：日常裡的小觀察、溫馨或好笑的瞬間，看了想按讚分享
     observe: `${when}分享一個你在日常生活中觀察到的小瞬間，15 到 60 個字：路上、捷運、超商、公司、家裡看到的有趣、溫馨或讓人會心一笑的事。要像真的看到的，寫得口語、有畫面，不要說教、不要提真實人名或店名。`,
     topic: `${when}最近大家都在聊「${topic?.name}」。用玩家的口吻發一則貼文，可以是心得、吐槽、期待、新手建議或問大家問題，20 到 100 個字，可以加 #${(topic?.name || '').replace(/\s+/g, '')}。
-具體資訊只能用下面提供的內容，不要捏造任務名稱、數字、角色、地點或彩蛋；沒提供的細節就講個人感受或一般玩法建議。
+具體資訊只能用下面提供的內容與新聞標題，不要捏造名稱、數字、日期、股價或細節；沒提供的就講個人感受、看法或問大家。如果跟股票投資有關，只能聊看法與心情，不能給買賣建議。
 已知資訊：${topic?.facts || ''}${headlines.length ? `\n最近新聞標題：\n${headlines.slice(0, 6).join('\n')}` : ''}`,
   };
   const photoAsk = wantPhoto ? '\n這篇會配一張用手機隨手拍的照片：寫完貼文後，另起最後一行寫「PHOTO: 」加上 8 到 20 個英文單字，具體描述照片畫面，要跟貼文內容一致（例如貼文說客廳很亂，就寫 messy living room with clothes and empty cups on the sofa）。畫面只能有物品、食物、動物、地點或風景，絕對不能有人、人臉、手或身體，也不要有包裝盒、招牌、書本、螢幕這類會有字的東西。' : '';
@@ -148,6 +149,28 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
   return pick(style === 'banter' ? ['好想下班', '今天也是廢廢的一天', '肚子餓到可以吃下一頭牛'] : style === 'joke' ? ['為什麼海很鹹？因為魚在裡面流汗。'] : [`${twNow()}，又是想窩著什麼都不做的時刻。大家現在在做什麼？`]);
 }
 
+/** 分享一部 YouTube 影片：只根據標題講一兩句感想，不捏造影片內容 */
+async function postVideo(env: Env, model: string, a: Account, v: Video, boards: Board[], toBack: D1PreparedStatement): Promise<string | null> {
+  const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。`;
+  const prompt = `你要在社群分享一部 YouTube 影片。影片標題：「${v.title}」（頻道：${v.channel}）。
+用 1 到 2 句話、10 到 50 個字寫分享時的感想或問大家的看法，像真人轉貼影片時隨手打的字。
+只能根據標題講，不要假裝看過影片細節、不要捏造數字或內容；如果跟股票有關，不要給買賣建議。不要附網址。`;
+  const out = await generate(env, system, prompt, 120, model);
+  if (!out || REFUSAL.test(out)) { await toBack.run(); return null; }
+  const text = await reviewPost(env, model, fixTypos(out.replace(/^["「『]|["」』]$/g, '').replace(/https?:\/\/\S+/g, '').trim()));
+  if (!text) { await toBack.run(); return null; }
+  const board = (v.grp === 'game' ? boards.find((b) => b.content_group === 'game') : boards.find((b) => b.content_group === 'news')) || null;
+  const id = newId();
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO posts (id, user_id, text, link_url, link_title, link_site, link_image, community_id, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'content', ?)`)
+      .bind(id, a.id, text.slice(0, 1000), `https://www.youtube.com/watch?v=${v.id}`, v.title, `YouTube · ${v.channel}`, `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`, board?.id ?? null, t),
+    env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(t, a.id),
+    ...(board ? [env.DB.prepare('UPDATE communities SET post_count = post_count + 1 WHERE id = ?').bind(board.id)] : []),
+  ]);
+  return id;
+}
+
 async function postOne(env: Env, model: string, a: Account, photoRatio: number, boards: Board[], s: Record<string, string>): Promise<string | null> {
   // 不論成功與否都排到隊伍最後面，下一則換別人（輪流）
   const toBack = env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(now(), a.id);
@@ -156,12 +179,20 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
     news = await takeNews(env);
     if (!news) { await toBack.run(); return null; }
   }
+  // 分享影片：遊戲帳號分享遊戲影片，時事／綜合帳號分享新聞、科技、財經影片（像脆上大家轉貼影片聊時事）
+  const vRatio = Math.max(0, Math.min(60, Number(s.video_ratio ?? 15)));
+  if (!news && a.content_group !== 'fun' && Math.random() * 100 < vRatio) {
+    const groups = a.content_group === 'game' ? ['game'] : a.content_group === 'mixed' ? ['game', 'tech', 'news', 'finance'] : ['news', 'tech', 'finance'];
+    const kws = ['GTA', '俠盜', '黃仁勳', 'Jensen', 'NVIDIA', '輝達', '台股', '股市', '台積電', ...hotTopics(s).map((t) => t.name)];
+    const v = await takeVideo(env, groups, kws);
+    if (v) return postVideo(env, model, a, v, boards, toBack);
+  }
   const { style, topic } = news ? { style: 'normal' as Style, topic: null } : chooseStyle(s, a);
   let board = chooseBoard(boards, a, !!news);
   let headlines: string[] = [];
   if (style === 'topic' && topic) {
-    board = boards.find((b) => b.content_group === 'game') || board;
-    const kw = topic.name.replace(/\s+/g, '').slice(0, 10);
+    board = (topic.board === 'news' ? boards.find((b) => b.content_group === 'news') : boards.find((b) => b.content_group === 'game')) || board;
+    const kw = (topic.keyword || topic.name).replace(/\s+/g, '').slice(0, 10);
     const r = await env.DB.prepare("SELECT title FROM news_cache WHERE replace(title, ' ', '') LIKE ? ORDER BY fetched_at DESC LIMIT 6").bind(`%${kw}%`).all<{ title: string }>();
     headlines = r.results.map((x) => x.title);
   }
@@ -340,6 +371,7 @@ export async function handleCron(env: Env, _cron: string) {
   const d = new Date();
   const m = d.getUTCMinutes();
   if (m === 0 || m === 30) await fetchNewsImpl(env).catch(() => {});
+  if (m === 15 || m === 45) await fetchVideos(env).catch((e) => console.log('videos', String(e)));
   // 每日投票：台灣時間 10:00 起每 10 分鐘檢查一次（今天發過就跳過）
   if (d.getUTCHours() >= 2 && d.getUTCHours() < 14 && m % 10 === 0) await runDailyPoll(env).catch((e) => console.log('daily poll', String(e)));
   if (m % 10 === 3) await cleanupStories(env).catch((e) => console.log('stories cleanup', String(e)));

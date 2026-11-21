@@ -8,6 +8,7 @@ import { getSetting, setSetting } from './env';
 const STEPS: string[] = [
   'ALTER TABLE posts ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE posts ADD COLUMN link_image TEXT',
+  'CREATE TABLE IF NOT EXISTS video_cache (id TEXT PRIMARY KEY, title TEXT NOT NULL, channel TEXT, grp TEXT, published_at INTEGER, fetched_at INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0)',
 ];
 
 export async function migrate(env: Env) {
