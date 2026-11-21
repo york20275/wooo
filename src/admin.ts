@@ -182,7 +182,7 @@ admin.get('/content', async (c) => {
   const perDay = dailyPosts(s);
   return c.json({
     accounts: r.results,
-    settings: { ...s, newsdata_key: s.newsdata_key ? '已設定' : '', pexels_key: s.pexels_key || c.env.PEXELS_API_KEY ? '已設定' : '' },
+    settings: { ...s, newsdata_key: s.newsdata_key ? '已設定' : '', pexels_key: s.pexels_key || c.env.PEXELS_API_KEY ? '已設定' : '', pixabay_key: s.pixabay_key ? '已設定' : '' },
     today: Object.fromEntries(today.results.map((x: any) => [x.g, x.n])),
     groups,
     posts_per_day: Math.round(perDay),
@@ -204,7 +204,7 @@ admin.patch('/content/:id', async (c) => {
 });
 
 const EDITABLE = ['content_enabled', 'daily_posts', 'interact_like', 'interact_comment', 'old_posts_mode',
-  'group_news', 'group_game', 'group_mixed', 'group_fun', 'paused_until', 'newsdata_key', 'rss_feeds', 'feed_content_ratio', 'ai_model', 'photo_ratio', 'pexels_key', 'community_ratio', 'daily_poll'];
+  'group_news', 'group_game', 'group_mixed', 'group_fun', 'paused_until', 'newsdata_key', 'rss_feeds', 'feed_content_ratio', 'ai_model', 'photo_ratio', 'pexels_key', 'pixabay_key', 'community_ratio', 'daily_poll'];
 export const AI_MODELS = ['', '@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct-fp8-fast', '@cf/meta/llama-4-scout-17b-16e-instruct'];
 admin.patch('/settings', async (c) => {
   const b = await c.req.json<Record<string, any>>();
@@ -222,7 +222,7 @@ admin.patch('/settings', async (c) => {
       val = JSON.stringify(list);
     }
     await setSetting(c.env.DB, k, val);
-    await logAudit(c.env.DB, c.get('user')!.id, 'setting', k, k === 'newsdata_key' || k === 'pexels_key' ? '（已更新）' : val);
+    await logAudit(c.env.DB, c.get('user')!.id, 'setting', k, k === 'newsdata_key' || k === 'pexels_key' || k === 'pixabay_key' ? '（已更新）' : val);
   }
   return c.json({ ok: true });
 });

@@ -77,7 +77,7 @@ function imageGrid(p) {
   if (!imgs.length) return null;
   const grid = h('div', { class: `pimg grid g${imgs.length} ${p.sensitive ? 'blur' : ''}` },
     imgs.map((src, i) => h('img', { src, alt: `貼文圖片 ${i + 1}`, loading: 'lazy', onclick: () => { if (!grid.classList.contains('blur')) lightbox(imgs.map((url) => ({ url })), i); } })));
-  if (p.image_credit) grid.append(h('a', { class: 'credit', href: p.image_credit.url, target: '_blank', rel: 'noopener', onclick: (e) => e.stopPropagation() }, `攝影：${p.image_credit.name}／Pexels`));
+  if (p.image_credit) grid.append(h('a', { class: 'credit', href: p.image_credit.url, target: '_blank', rel: 'noopener', onclick: (e) => e.stopPropagation() }, `攝影：${p.image_credit.name.includes('／') ? p.image_credit.name : p.image_credit.name + '／Pexels'}`));
   if (p.sensitive) {
     const cover = h('button', { class: 'cover', 'aria-label': '敏感內容，點擊查看' }, icon('eyeoff'), h('b', null, '敏感內容'), h('span', null, '發文者已標記 · 點擊查看'));
     cover.addEventListener('click', (e) => { e.stopPropagation(); grid.classList.remove('blur'); cover.remove(); });

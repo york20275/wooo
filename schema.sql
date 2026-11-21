@@ -357,6 +357,7 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
   ('photo_ratio', '30'),
   ('daily_poll', '1'),                       -- 每天一題 ✦ 全站投票                     -- 非時事的 ✦ 貼文有幾 % 附真實照片（Pexels）
   ('pexels_key', ''),
+  ('pixabay_key', ''),
   ('group_fun', '1'),
   ('feed_content_ratio', '50'),              -- 熱門動態牆中 ✦ 內容最多佔幾 %
   ('ai_model', ''),                          -- 空白 = 用 wrangler.toml 的 AI_MODEL
