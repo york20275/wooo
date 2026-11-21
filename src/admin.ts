@@ -3,6 +3,7 @@ import type { AppEnv, User } from './env';
 import { getSettings, logAudit, now, setSetting, twDay } from './env';
 import { cleanReason, MOD_REASONS, modAdmin, recordAction } from './moderation';
 import { runDailyPoll } from './features';
+import { findPhoto } from './photos';
 import { HttpError, deletePost } from './api';
 import { deleteUserData } from './social';
 import { runPostTick, fetchNews, dailyPosts } from './content';
@@ -286,6 +287,17 @@ admin.get('/audit', async (c) => {
 admin.post('/content/daily-poll', async (c) => {
   await logAudit(c.env.DB, c.get('user')!.id, 'daily_poll_now', null);
   return c.json(await runDailyPoll(c.env, true));
+});
+
+/** 診斷：真實照片搜尋（不發文，只回報每一步結果；成功時會存一張圖到 R2） */
+admin.get('/photo-test', async (c) => {
+  const debug: string[] = [];
+  try {
+    const photo = await findPhoto(c.env, c.req.query('q') || 'cat', debug);
+    return c.json({ photo, debug });
+  } catch (e) {
+    return c.json({ error: String(e), debug });
+  }
 });
 
 admin.route('/', modAdmin);

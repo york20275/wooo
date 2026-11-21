@@ -36,7 +36,7 @@ export async function pexelsKey(env: Env) {
 interface Candidate { image: string; credit: string; page: string }
 
 /** 依序嘗試：Pexels（有金鑰）→ Pixabay（有金鑰）→ Openverse（免金鑰，CC0／公眾領域／CC BY） */
-async function candidates(env: Env, query: string): Promise<Candidate[]> {
+export async function candidates(env: Env, query: string, debug?: string[]): Promise<Candidate[]> {
   const pexels = await pexelsKey(env);
   if (pexels) {
     const base = env.PEXELS_API_BASE || 'https://api.pexels.com';
@@ -59,7 +59,7 @@ async function candidates(env: Env, query: string): Promise<Candidate[]> {
   const r = await fetch(`https://api.openverse.org/v1/images/?q=${encodeURIComponent(query)}&license=cc0,pdm,by&mature=false&aspect_ratio=wide&page_size=30`, {
     headers: { 'User-Agent': 'WooBot/1.0 (+https://wootw.com)' },
   });
-  if (!r.ok) { console.log('openverse', r.status); return []; }
+  if (!r.ok) { console.log('openverse', r.status); debug?.push(`openverse HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`); return []; }
   const d = (await r.json()) as any;
   return (d.results || [])
     .filter((x: any) => x.url)
@@ -70,16 +70,19 @@ async function candidates(env: Env, query: string): Promise<Candidate[]> {
     }));
 }
 
-export async function findPhoto(env: Env, query: string): Promise<Photo | null> {
-  const list = (await candidates(env, query)).sort(() => Math.random() - 0.5);
+export async function findPhoto(env: Env, query: string, debug?: string[]): Promise<Photo | null> {
+  const list = (await candidates(env, query, debug)).sort(() => Math.random() - 0.5);
+  debug?.push(`候選 ${list.length} 張`);
   for (const p of list.slice(0, 6)) {
     // 同一張照片不重複使用
     const used = await env.DB.prepare('SELECT 1 FROM posts WHERE image_credit_url = ? LIMIT 1').bind(p.page).first();
     if (used) continue;
     const img = await fetch(p.image, { headers: { 'User-Agent': 'WooBot/1.0 (+https://wootw.com)' } }).catch(() => null);
     const type = img?.headers.get('content-type') || '';
+    debug?.push(`${p.image} → ${img ? img.status : '連線失敗'} ${type}`);
     if (!img || !img.ok || !type.startsWith('image/') || type.includes('svg')) continue;
     const buf = await img.arrayBuffer();
+    debug?.push(`大小 ${buf.byteLength}`);
     if (buf.byteLength > 4 * 1024 * 1024 || buf.byteLength < 5000) continue;
     const d = new Date();
     const ext = type.includes('png') ? 'png' : type.includes('webp') ? 'webp' : 'jpg';
