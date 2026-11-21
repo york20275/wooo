@@ -316,6 +316,13 @@ admin.post('/content/seed-commenters', async (c) => {
   return c.json({ added });
 });
 
+admin.get('/flux-test', async (c) => {
+  try {
+    const out = (await c.env.AI.run('@cf/black-forest-labs/flux-1-schnell' as any, { prompt: c.req.query('p') || 'a cat on a sofa', steps: 4 })) as any;
+    return c.json({ ok: !!out?.image, len: out?.image?.length || 0 });
+  } catch (e) { return c.json({ err: String(e) }); }
+});
+
 admin.get('/text-test', async (c) => {
   const obj = await c.env.IMAGES.get(c.req.query('k') || '');
   if (!obj) return c.json({ error: 'not found' });
