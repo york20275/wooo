@@ -101,9 +101,9 @@ function modal(title, ...content) {
   bg.remove = ((orig) => () => { orig.call(bg); document.removeEventListener('keydown', onKey); })(bg.remove);
   return bg;
 }
-function needLogin() { modal('先登入吧', h('p', null, '用 Google 帳號就能登入窩Woo！，按讚、留言、發文。'), loginButton()); }
+function needLogin() { modal('加入窩Woo！', h('p', null, '用 Google 帳號一鍵註冊，就能按讚、留言、發文。在這裡暢所欲言，不會被亂刪帳號。'), S.founderLeft ? h('p', { class: 'muted' }, `🏅 前 100 名註冊送「開站元老」徽章，還剩 ${S.founderLeft} 名`) : null, loginButton()); }
 function loginButton() {
-  const wrap = h('div', { class: 'row wrap' }, h('a', { class: 'btn', href: '/auth/google' }, '用 Google 登入'));
+  const wrap = h('div', { class: 'row wrap' }, h('a', { class: 'btn', href: loginHref() }, '用 Google 登入'));
   if (S.dev) wrap.append(h('a', { class: 'btn ghost', href: '/auth/dev?email=tester@example.com&name=測試用戶' }, '測試登入（開發模式）'));
   return wrap;
 }
@@ -206,7 +206,7 @@ window.addEventListener('popstate', render);
 function header() {
   const q = h('input', { type: 'search', placeholder: '搜尋', 'aria-label': '搜尋' });
   const form = h('form', { class: 'search', role: 'search', onsubmit: (e) => { e.preventDefault(); if (q.value.trim()) navigate(`/explore?q=${encodeURIComponent(q.value.trim())}`); } }, icon('search'), q);
-  const right = S.me ? avatar(S.me) : h('a', { class: 'btn small', href: '/auth/google' }, '登入');
+  const right = S.me ? avatar(S.me) : h('a', { class: 'btn small', href: loginHref() }, '註冊／登入');
   return h('header', { class: 'top' },
     h('a', { class: 'logo', href: '/', 'aria-label': '窩Woo！首頁' }, h('img', { src: '/logo.png', alt: '窩Woo！', width: '106', height: '46' })),
     form, right);
@@ -242,10 +242,20 @@ function aside() {
     h('p', { class: 'foot' }, h('a', { href: '/about' }, '關於'), ' · ', h('a', { href: '/about#content' }, '✦ 說明'), ' · ', h('a', { href: '/about#rules' }, '社群規範'), h('br'),
       h('a', { href: '/transparency' }, '透明度報告'), ' · ', h('a', { href: '/privacy' }, '隱私權政策'), ' · ', h('a', { href: '/terms' }, '使用條款'), h('br'), '© 2026 窩Woo！'));
 }
+const loginHref = () => `/auth/google?next=${encodeURIComponent(location.pathname + location.search)}`;
+/** 沒登入的訪客：底部固定的註冊提示（可關掉，這次瀏覽不再出現） */
+function joinBar() {
+  if (S.me || sessionStorage.getItem('joinbar-off')) return null;
+  const bar = h('div', { class: 'joinbar glass', role: 'region', 'aria-label': '加入窩Woo！' },
+    h('div', { class: 'jb-text' }, h('b', null, '窩Woo！台灣人自己的社群'), h('span', null, S.founderLeft ? `言論自由、不會被亂刪帳號。前 100 名註冊送「🏅 開站元老」徽章，還剩 ${S.founderLeft} 名！` : '言論自由、暢所欲言，不會被亂刪帳號。')),
+    h('a', { class: 'btn', href: loginHref() }, 'Google 一鍵註冊'),
+    h('button', { class: 'icon-btn', 'aria-label': '關閉', onclick: () => { try { sessionStorage.setItem('joinbar-off', '1'); } catch {} bar.remove(); } }, '✕'));
+  return bar;
+}
 function shell(path, mainEl) {
   const banner = typeof statusBanner === 'function' ? statusBanner() : null;
   if (banner && mainEl.firstChild) mainEl.prepend(banner);
-  app.replaceChildren(header(), h('div', { class: 'layout' }, sideNav(path), mainEl, aside()), bottomNav(path));
+  app.replaceChildren(header(), h('div', { class: 'layout' }, sideNav(path), mainEl, aside()), joinBar(), bottomNav(path));
 }
 const pageTitle = (t) => h('h1', { class: 'ptitle' }, t);
 
@@ -956,6 +966,12 @@ async function settingsPage() {
   const large = document.documentElement.classList.contains('large');
   const sizeBtn = (on, label) => h('button', { class: `btn small ${on ? '' : 'ghost'}`, onclick: () => { document.documentElement.classList.toggle('large', label === '大'); try { localStorage.setItem('large', label === '大' ? '1' : '0'); } catch {} settingsPage(); } }, label);
 
+  const inviteUrl = S.me ? `${location.origin}/?ref=${S.me.handle}` : '';
+  const invite = S.me ? h('section', { class: 'card glass' }, h('h2', null, '邀請朋友'),
+    h('span', { class: 'muted' }, `把你的專屬連結傳給朋友，他們用這個連結註冊就會算你邀請的。你已經邀請了 ${S.invited || 0} 位朋友。`),
+    h('div', { class: 'row wrap' }, h('input', { value: inviteUrl, readonly: true, style: 'flex:1;min-width:220px', onclick: (e) => e.target.select() }),
+      h('button', { class: 'btn small', onclick: async () => { try { await navigator.clipboard.writeText(inviteUrl); toast('已複製邀請連結'); } catch { toast(inviteUrl); } } }, '複製'),
+      h('a', { class: 'btn ghost small', href: `https://social-plugins.line.me/lineit/share?url=${encodeURIComponent(inviteUrl)}`, target: '_blank', rel: 'noopener' }, '傳到 LINE'))) : null;
   const sensitive = h('section', { class: 'card glass' }, h('h2', null, '敏感內容'));
   if (!S.me) sensitive.append(h('span', { class: 'muted' }, '登入並確認年滿 18 歲後才能開啟。'));
   else {
@@ -1010,7 +1026,7 @@ async function settingsPage() {
     h('section', { class: 'card glass' }, h('h2', null, '顯示'),
       h('label', { class: 'row between' }, '卡片透明度', op),
       h('div', { class: 'row between' }, '文字大小', h('div', { class: 'row' }, sizeBtn(!large, '標準'), sizeBtn(large, '大')))),
-    mutedSection(), sensitive, notifySec, account,
+    invite, mutedSection(), sensitive, notifySec, account,
     S.me ? h('section', { class: 'card glass' }, h('h2', null, '處理紀錄與申訴'), h('span', { class: 'muted' }, '如果你的內容或帳號曾被管理團隊處理，原因和申訴都在這裡。'), h('a', { class: 'btn ghost small', href: '/moderation', style: 'align-self:flex-start' }, '查看處理紀錄')) : null);
   shell('/settings', main);
 }
@@ -1114,6 +1130,7 @@ function termsPage() {
 async function loadMe() {
   try {
     const d = await api('GET', '/api/me');
+    S.founderLeft = d.founder_left ?? null; S.invited = d.invited || 0;
     S.me = d.user; S.unread = d.unread || 0; S.unreadMsg = d.unread_messages || 0; S.dev = !!d.dev_mode;
     S.turnstile = d.turnstile_sitekey || null; S.vapid = d.vapid_public_key || null; S.accents = d.accents || [];
     if (S.me?.theme) applyTheme(S.me.theme);
@@ -1131,5 +1148,11 @@ setInterval(async () => {
   await loadMe();
   if (S.unread + S.unreadMsg !== before) document.querySelectorAll('nav.side, nav.bottom').forEach((n) => n.replaceWith(n.classList.contains('side') ? sideNav(location.pathname) : bottomNav(location.pathname)));
 }, 60000);
+// 推廣來源：?ref=帳號（朋友邀請）或 ?utm_source=管道，記 30 天，註冊時一起存
+(() => {
+  const q = new URLSearchParams(location.search);
+  const ref = q.get('ref') ? `u:${q.get('ref')}` : q.get('utm_source') ? `src:${q.get('utm_source')}` : null;
+  if (ref && !document.cookie.includes('ref=')) document.cookie = `ref=${encodeURIComponent(ref.replace(/[^\w:.\-]/g, '').slice(0, 40))}; path=/; max-age=${30 * 86400}; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`;
+})();
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('/sw.js').catch(() => {});
 loadMe().then(() => { render(); if (S.me && !S.me.onboarded && !location.pathname.startsWith('/admin')) onboarding().catch(() => {}); });

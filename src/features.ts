@@ -327,6 +327,7 @@ export async function runDailyPoll(env: Env, force = false) {
 // ======================= 徽章 =======================
 export const BADGES: Record<string, { label: string; icon: string; desc: string }> = {
   gm: { label: '管理團隊', icon: '🛡️', desc: '窩Woo！管理團隊成員' },
+  founder: { label: '開站元老', icon: '🏅', desc: '前 100 位加入窩Woo！的真人用戶' },
   early: { label: '早期住戶', icon: '🌱', desc: '前 1000 位加入窩Woo！的用戶' },
   replier: { label: '熱心回覆', icon: '💬', desc: '留言超過 100 則' },
   popular: { label: '人氣作者', icon: '⭐', desc: '文章累積超過 300 個真人讚' },
@@ -337,16 +338,17 @@ export async function badgesFor(env: Env, u: User) {
   if (u.is_content) return [];
   const q = (sql: string, ...b: any[]) => env.DB.prepare(sql).bind(...b).first<{ n: number }>().then((r) => r?.n ?? 0);
   const [rank, comments, likes, polls] = await Promise.all([
-    q('SELECT COUNT(*) AS n FROM users WHERE is_content = 0 AND created_at < ?', u.created_at),
+    q("SELECT COUNT(*) AS n FROM users WHERE is_content = 0 AND role != 'gm' AND created_at < ?", u.created_at),
     q('SELECT COUNT(*) AS n FROM comments WHERE user_id = ?', u.id),
     q('SELECT COALESCE(SUM(real_like_count), 0) AS n FROM posts WHERE user_id = ?', u.id),
     q('SELECT COUNT(*) AS n FROM polls pl JOIN posts p ON p.id = pl.post_id WHERE p.user_id = ?', u.id),
   ]);
   const keys: string[] = [];
   if (u.role === 'gm') keys.push('gm');
-  if (rank < 1000) keys.push('early');
+  if (rank < 100 && u.role !== 'gm') keys.push('founder');
+  else if (rank < 1000) keys.push('early');
   if (comments >= 100) keys.push('replier');
   if (likes >= 300) keys.push('popular');
   if (polls >= 10) keys.push('pollster');
-  return keys.map((k) => ({ key: k, ...BADGES[k] }));
+  return keys.map((k) => (k === 'founder' ? { key: k, ...BADGES[k], label: `開站元老 #${rank + 1}` } : { key: k, ...BADGES[k] }));
 }

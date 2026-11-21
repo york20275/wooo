@@ -64,6 +64,12 @@ export async function serverStats(env: Env) {
     env.DB.prepare('SELECT MAX(created_at) AS t FROM content_log').first<{ t: number }>().then((r) => r?.t ?? 0),
     getSettings(env.DB),
   ]);
+  const signups = {
+    today: await n("SELECT COUNT(*) AS n FROM users WHERE is_content = 0 AND created_at >= ?", dayStart),
+    week: await n("SELECT COUNT(*) AS n FROM users WHERE is_content = 0 AND created_at >= ?", now() - 7 * 86400_000),
+    by_ref: (await env.DB.prepare("SELECT COALESCE(ref, '直接進站') AS ref, COUNT(*) AS n FROM users WHERE is_content = 0 GROUP BY 1 ORDER BY 2 DESC LIMIT 15").all<{ ref: string; n: number }>()).results,
+    by_day: (await env.DB.prepare("SELECT date((created_at + 28800000) / 1000, 'unixepoch') AS day, COUNT(*) AS n FROM users WHERE is_content = 0 AND created_at >= ? GROUP BY 1 ORDER BY 1").bind(now() - 14 * 86400_000).all<{ day: string; n: number }>()).results,
+  };
   const aiPostsToday = await n("SELECT COUNT(*) AS n FROM posts WHERE source = 'content' AND created_at >= ?", dayStart);
   // AI 用量估算：發文約 40 neurons（70B）、留言約一半是罐頭回覆，AI 留言約 3 neurons（8B）
   const neurons = Math.round(aiPostsToday * 40 + aiComments * 0.55 * 3);
@@ -71,6 +77,7 @@ export async function serverStats(env: Env) {
     plan: s.cf_plan === 'paid' ? 'paid' : 'free',
     limits: LIMITS,
     db: { latency_ms: dbLatency, ok: !!ping, size_bytes: (sizeProbe.meta as any)?.size_after ?? null },
+    signups,
     users: { online5, online30, active_today: activeToday, real: realUsers, content: contentUsers },
     content: { posts, posts_today: postsToday, comments, comments_today: commentsToday, ai_posts_today: aiPostsToday, ai_comments_today: aiComments, likes, uploads },
     ai: { neurons_today_est: neurons },

@@ -226,14 +226,20 @@ export async function visibility(c: any, opts: { forHot?: boolean; ignoreBlocks?
 // ---------- 自己 ----------
 api.get('/me', async (c) => {
   const u = c.get('user');
-  if (!u) return c.json({ user: null, vapid_public_key: c.env.VAPID_PUBLIC_KEY || null });
+  if (!u) {
+    // 沒登入的訪客：告訴他元老徽章還剩幾個名額
+    const real = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE is_content = 0 AND role != 'gm'").first<{ n: number }>();
+    return c.json({ user: null, vapid_public_key: c.env.VAPID_PUBLIC_KEY || null, founder_left: Math.max(0, 100 - (real?.n ?? 0)) });
+  }
   const [unread, unreadMsg] = await Promise.all([
     c.env.DB.prepare('SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read = 0').bind(u.id).first<{ n: number }>(),
     c.env.DB.prepare(
       `SELECT COUNT(*) AS n FROM conversations WHERE (user_a = ? AND last_message_at > a_read_at) OR (user_b = ? AND last_message_at > b_read_at)`
     ).bind(u.id, u.id).first<{ n: number }>(),
   ]);
+  const invited = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM users WHERE ref = ?').bind(`u:${u.handle}`).first<{ n: number }>();
   return c.json({
+    invited: invited?.n ?? 0,
     user: {
       id: u.id, name: u.name, handle: u.handle, bio: u.bio, email: u.email, avatar_url: imgUrl(u.avatar_key), banner_url: imgUrl(u.banner_key),
       accent: u.accent, pinned_post_id: u.pinned_post_id, role: u.role, theme: u.theme, age_verified: !!u.age_verified, show_sensitive: !!u.show_sensitive,

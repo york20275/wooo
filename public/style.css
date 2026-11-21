@@ -412,3 +412,9 @@ h1.blogtitle { font-size: 26px; }
 .ytcard .ltext { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px 12px; text-decoration: none; color: inherit; }
 .ytcard .ltext small { color: var(--muted); font-size: 12px; }
 .ytcard .ltext b { font-size: 14px; font-weight: 500; }
+
+/* 沒登入訪客的註冊提示 */
+.joinbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 16px; z-index: 60; display: flex; align-items: center; gap: 12px; padding: 12px 14px 12px 18px; border-radius: 18px; width: min(720px, calc(100% - 24px)); box-shadow: 0 10px 30px rgba(0,0,0,.18); }
+.joinbar .jb-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.joinbar .jb-text span { font-size: 13px; color: var(--muted); }
+@media (max-width: 640px) { .joinbar { bottom: 72px; flex-wrap: wrap; } .joinbar .jb-text { flex-basis: calc(100% - 40px); } .joinbar .btn { flex: 1; } }

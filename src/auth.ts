@@ -26,7 +26,7 @@ async function makeHandle(db: D1Database, base: string): Promise<string> {
   return h + newId().slice(0, 6);
 }
 
-async function upsertGoogleUser(env: Env, sub: string, email: string, name: string): Promise<User> {
+async function upsertGoogleUser(env: Env, sub: string, email: string, name: string, ref: string | null = null): Promise<User> {
   const gmList = (env.GM_EMAILS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   const isGm = gmList.includes(email.toLowerCase());
   const existing = await env.DB.prepare('SELECT * FROM users WHERE google_sub = ?').bind(sub).first<User>();
@@ -40,8 +40,8 @@ async function upsertGoogleUser(env: Env, sub: string, email: string, name: stri
   const id = newId();
   const handle = await makeHandle(env.DB, email.split('@')[0]);
   await env.DB.prepare(
-    'INSERT INTO users (id, google_sub, email, name, handle, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).bind(id, sub, email, name.slice(0, 40) || handle, handle, isGm ? 'gm' : 'user', now()).run();
+    'INSERT INTO users (id, google_sub, email, name, handle, role, created_at, ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(id, sub, email, name.slice(0, 40) || handle, handle, isGm ? 'gm' : 'user', now(), ref).run();
   return (await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(id).first<User>())!;
 }
 
@@ -60,6 +60,8 @@ auth.get('/google', (c) => {
   const state = randomToken(16);
   const secure = new URL(c.req.url).protocol === 'https:';
   setCookie(c, 'oauth_state', state, { httpOnly: true, secure, sameSite: 'Lax', path: '/auth', maxAge: 600 });
+  const next = c.req.query('next');
+  if (next && next.startsWith('/') && !next.startsWith('//')) setCookie(c, 'next', next.slice(0, 200), { httpOnly: true, secure, sameSite: 'Lax', path: '/', maxAge: 600 });
   const p = new URLSearchParams({
     client_id: c.env.GOOGLE_CLIENT_ID,
     redirect_uri: `${c.env.SITE_URL}/auth/google/callback`,
@@ -96,9 +98,13 @@ auth.get('/google/callback', async (c) => {
   if (!infoRes.ok) return c.text('無法讀取 Google 帳號資料', 502);
   const info = (await infoRes.json()) as { sub: string; email: string; email_verified?: boolean; name?: string };
   if (!info.email_verified) return c.text('這個 Google 帳號的 Email 尚未驗證', 403);
-  const user = await upsertGoogleUser(c.env, info.sub, info.email, info.name || '');
+  const ref = (getCookie(c, 'ref') || '').replace(/[^\w:.\-]/g, '').slice(0, 40) || null;
+  const user = await upsertGoogleUser(c.env, info.sub, info.email, info.name || '', ref);
   await startSession(c, user.id);
-  return c.redirect(user.status === 'active' ? '/' : '/moderation');
+  // 登入後回到原本在看的頁面
+  const next = getCookie(c, 'next') || '/';
+  deleteCookie(c, 'next', { path: '/' });
+  return c.redirect(user.status === 'active' ? (/^\/[\w\/\-%.?=&]*$/.test(next) && !next.startsWith('//') ? next : '/') : '/moderation');
 });
 
 /** 本機測試登入：只有 DEV_MODE=1 才能用 */
