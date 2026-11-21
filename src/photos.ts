@@ -64,7 +64,8 @@ export async function candidates(env: Env, query: string, debug?: string[]): Pro
   return (d.results || [])
     .filter((x: any) => x.url)
     .map((x: any) => ({
-      image: x.url,
+      // Flickr 會擋 Cloudflare 伺服器（403），改用 Openverse 自己代理的縮圖
+      image: /staticflickr|flickr\.com/.test(x.url) && x.thumbnail ? `${x.thumbnail}?full_size=true` : x.url,
       credit: `${(x.creator || '佚名').slice(0, 40)}／${x.license === 'by' ? `CC BY ${x.license_version || ''}`.trim() : x.license === 'cc0' ? 'CC0' : '公眾領域'}`,
       page: x.foreign_landing_url || x.url,
     }));
@@ -77,7 +78,8 @@ export async function findPhoto(env: Env, query: string, debug?: string[]): Prom
     // 同一張照片不重複使用
     const used = await env.DB.prepare('SELECT 1 FROM posts WHERE image_credit_url = ? LIMIT 1').bind(p.page).first();
     if (used) continue;
-    const img = await fetch(p.image, { headers: { 'User-Agent': 'WooBot/1.0 (+https://wootw.com)' } }).catch(() => null);
+    let img = await fetch(p.image, { headers: { 'User-Agent': 'WooBot/1.0 (+https://wootw.com)' } }).catch(() => null);
+    if ((!img || !img.ok) && p.image.includes('full_size=true')) img = await fetch(p.image.replace('?full_size=true', ''), { headers: { 'User-Agent': 'WooBot/1.0 (+https://wootw.com)' } }).catch(() => null);
     const type = img?.headers.get('content-type') || '';
     debug?.push(`${p.image} → ${img ? img.status : '連線失敗'} ${type}`);
     if (!img || !img.ok || !type.startsWith('image/') || type.includes('svg')) continue;
