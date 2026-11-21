@@ -320,8 +320,12 @@ admin.get('/text-test', async (c) => {
   const obj = await c.env.IMAGES.get(c.req.query('k') || '');
   if (!obj) return c.json({ error: 'not found' });
   const bin = new Uint8Array(await obj.arrayBuffer());
-  const r = (await c.env.AI.run('@cf/llava-hf/llava-1.5-7b-hf' as any, { image: [...bin], prompt: 'Is there any visible text, letters, characters, numbers, logo or watermark anywhere in this image, even small or blurry? Answer only yes or no.', max_tokens: 5 })) as any;
-  return c.json(r);
+  const model = c.req.query('m') || '@cf/llava-hf/llava-1.5-7b-hf';
+  const q = 'Is there any visible text, letters, characters, numbers, logo or watermark anywhere in this image, even small or blurry? Answer only yes or no.';
+  try {
+    const input: any = model.includes('llama-3.2') ? { messages: [{ role: 'user', content: q }], image: [...bin], max_tokens: 5 } : { image: [...bin], prompt: q, max_tokens: 5 };
+    return c.json({ model, r: await c.env.AI.run(model as any, input) });
+  } catch (e) { return c.json({ model, err: String(e) }); }
 });
 
 admin.get('/image-test', async (c) => {
