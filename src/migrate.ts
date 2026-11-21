@@ -7,6 +7,7 @@ import { getSetting, setSetting } from './env';
  */
 const STEPS: string[] = [
   'ALTER TABLE posts ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE posts ADD COLUMN link_image TEXT',
 ];
 
 export async function migrate(env: Env) {

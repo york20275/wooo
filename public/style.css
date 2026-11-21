@@ -396,3 +396,9 @@ h1.blogtitle { font-size: 26px; }
   .ccard.sq b, .ccard.sq h3 { font-size: 13px; }
   .ccard.sq small { font-size: 11px; }
 }
+
+/* 新聞連結卡片的縮圖 */
+.linkcard.has-img { padding: 0; overflow: hidden; }
+.linkcard .lthumb { width: 100%; aspect-ratio: 1.91 / 1; object-fit: cover; display: block; background: rgba(0,0,0,.05); }
+.linkcard .ltext { display: flex; flex-direction: column; gap: 2px; }
+.linkcard.has-img .ltext { padding: 10px 14px 12px; }

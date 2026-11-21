@@ -358,7 +358,7 @@ function postCard(p, { onDelete, full = false, pinned = false } = {}) {
         p.community ? h('a', { class: 'cchip', href: `/c/${p.community.slug}` }, `${p.community.icon} ${p.community.name}`) : null),
       isBlog ? h(full ? 'h1' : 'a', { class: 'blogtitle', href: full ? null : `/p/${p.id}` }, p.title) : null,
       textEl, more,
-      p.link ? h('a', { class: 'linkcard', href: p.link.url, target: '_blank', rel: 'noopener nofollow' }, h('small', null, p.link.site || '新聞來源'), h('b', null, p.link.title || p.link.url)) : null,
+      p.link ? h('a', { class: `linkcard${p.link.image ? ' has-img' : ''}`, href: p.link.url, target: '_blank', rel: 'noopener nofollow' }, p.link.image ? h('img', { class: 'lthumb', src: p.link.image, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.remove(); } }) : null, h('div', { class: 'ltext' }, h('small', null, p.link.site || '新聞來源'), h('b', null, p.link.title || p.link.url))) : null,
       p.poll ? pollBox(p) : null,
       media,
       p.quote ? quoteCard(p.quote) : null,

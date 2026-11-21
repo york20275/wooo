@@ -23,7 +23,7 @@ export function splitPhotoLine(text: string): { text: string; query: string | nu
   let query: string | null = null;
   const out = text.split('\n').filter((line) => {
     const m = line.match(/^\s*\**\s*PHOTO\s*[:：]\s*(.+?)\s*\**\s*$/i);
-    if (m) { query = m[1].replace(/[^a-zA-Z ]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || null; return false; }
+    if (m) { query = m[1].replace(/[^a-zA-Z ,]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) || null; return false; }
     return true;
   });
   return { text: out.join('\n').trim(), query };
@@ -125,14 +125,35 @@ async function openverseSquare(query: string) {
   return null;
 }
 
-/** 每次幫幾個還沒有頭像的 ✦ 帳號配頭像：約 3 成動物、2 成風景、5 成卡通人物（不使用真人照片） */
+export const IMAGE_MODEL = '@cf/black-forest-labs/flux-1-schnell';
+
+/** 用 AI 生成一張圖存到 R2（不用別人的照片）。失敗就回傳 null */
+export async function aiImage(env: Env, prompt: string, folder = 'c', square = false): Promise<string | null> {
+  try {
+    const full = `${prompt}, ${square ? 'cute avatar picture, centered subject, soft background' : 'candid smartphone snapshot, natural lighting, realistic everyday photo'}, no text, no letters, no watermark, no logo`;
+    const out = (await env.AI.run(IMAGE_MODEL as any, { prompt: full.slice(0, 2000), steps: 4 })) as any;
+    if (!out?.image) return null;
+    const bin = Uint8Array.from(atob(out.image), (ch) => ch.charCodeAt(0));
+    if (bin.byteLength < 3000) return null;
+    const d = new Date();
+    const key = folder === 'c' ? `c/${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${newId()}.jpg` : `${folder}/${newId()}.jpg`;
+    await env.IMAGES.put(key, bin, { httpMetadata: { contentType: 'image/jpeg' } });
+    return key;
+  } catch (e) { console.log('aiImage', String(e)); return null; }
+}
+
+/** 每次幫幾個還沒有頭像的 ✦ 帳號配頭像：約 3 成動物、2 成風景（AI 生成）、5 成卡通人物（不使用任何人的照片） */
 export async function assignAvatars(env: Env, n: number) {
   const r = await env.DB.prepare('SELECT id, handle FROM users WHERE is_content = 1 AND avatar_key IS NULL ORDER BY RANDOM() LIMIT ?').bind(n).all<{ id: string; handle: string }>();
   let done = 0;
   for (const u of r.results) {
     const roll = Math.random();
-    let img = roll < 0.3 ? await openverseSquare(pickOne(ANIMALS)) : roll < 0.5 ? await openverseSquare(pickOne(SCENES)) : null;
-    if (!img) {
+    if (roll < 0.5) {
+      const key = await aiImage(env, roll < 0.3 ? `a cute ${pickOne(ANIMALS)}` : `beautiful ${pickOne(SCENES)}`, `avatars/c`, true);
+      if (key) { await env.DB.prepare('UPDATE users SET avatar_key = ? WHERE id = ? AND avatar_key IS NULL').bind(key, u.id).run(); done++; continue; }
+    }
+    let img: { buf: ArrayBuffer; type: string } | null = null;
+    {
       const style = pickOne(CARTOON);
       img = await grab(`https://api.dicebear.com/9.x/${style}/png?seed=${encodeURIComponent(u.handle)}&size=256&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf,c7f0d8`);
     }

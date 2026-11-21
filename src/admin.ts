@@ -3,7 +3,7 @@ import type { AppEnv, User } from './env';
 import { getSettings, logAudit, now, setSetting, twDay } from './env';
 import { cleanReason, MOD_REASONS, modAdmin, recordAction } from './moderation';
 import { runDailyPoll } from './features';
-import { assignAvatars, findPhoto } from './photos';
+import { aiImage, assignAvatars, findPhoto } from './photos';
 import { migrate } from './migrate';
 import { serverStats } from './monitor';
 import { HttpError, deletePost } from './api';
@@ -314,6 +314,11 @@ admin.post('/content/seed-commenters', async (c) => {
   const added = await seedCommenters(c.env);
   await logAudit(c.env.DB, c.get('user')!.id, 'seed_commenters', null, String(added));
   return c.json({ added });
+});
+
+admin.get('/image-test', async (c) => {
+  const key = await aiImage(c.env, c.req.query('p') || 'messy living room with clothes on the sofa');
+  return c.json({ key, url: key ? `/img/${key}` : null });
 });
 
 admin.post('/content/avatars-now', async (c) => c.json({ done: await assignAvatars(c.env, 5) }));

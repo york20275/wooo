@@ -3,7 +3,7 @@ import { getSettings, logContent, newId, now } from './env';
 import { BASE_RULES, generate } from './ai';
 import { fetchNews as fetchNewsImpl, takeNews, type NewsItem } from './news';
 import { addComment, addLike } from './api';
-import { assignAvatars, findPhoto, splitPhotoLine, topicQuery } from './photos';
+import { aiImage, assignAvatars, splitPhotoLine, topicQuery } from './photos';
 import { cleanupStories, runDailyPoll } from './features';
 import { migrate } from './migrate';
 
@@ -91,6 +91,20 @@ ${text}`, 260, model);
   return fixTypos(r);
 }
 
+/** 讀新聞網頁的 og:image（連結預覽縮圖），讀不到就算了 */
+async function ogImage(url: string): Promise<string | null> {
+  try {
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WooBot/1.0; +https://wootw.com)', accept: 'text/html' }, redirect: 'follow', signal: AbortSignal.timeout(6000) });
+    if (!r.ok || !(r.headers.get('content-type') || '').includes('html')) return null;
+    const html = (await r.text()).slice(0, 300_000);
+    const m = html.match(/<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)(?::src)?["'][^>]*content=["']([^"']+)["']/i)
+      || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["'](?:og:image|twitter:image)["']/i);
+    if (!m) return null;
+    const img = new URL(m[1].replace(/&amp;/g, '&'), r.url).toString();
+    return /^https:\/\//.test(img) && img.length < 600 ? img : null;
+  } catch { return null; }
+}
+
 async function writePost(env: Env, model: string, a: Account, news: NewsItem | null, wantPhoto = false, board: Board | null = null, style: Style = 'normal', topic: HotTopic | null = null, headlines: string[] = []): Promise<string | null> {
   const boardLine = board && !news && style !== 'topic' ? `\n這篇發在「${board.name}」分類版（${board.description || board.name}），內容跟這個版有關，但保持你的說話風格。` : '';
   const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。${boardLine}`;
@@ -114,7 +128,7 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
 具體資訊只能用下面提供的內容，不要捏造任務名稱、數字、角色、地點或彩蛋；沒提供的細節就講個人感受或一般玩法建議。
 已知資訊：${topic?.facts || ''}${headlines.length ? `\n最近新聞標題：\n${headlines.slice(0, 6).join('\n')}` : ''}`,
   };
-  const photoAsk = wantPhoto ? '\n這篇會配一張照片：寫完貼文後，另起最後一行寫「PHOTO: 」加上 2 到 4 個英文單字，描述適合搭配的照片場景或物品（不要人物）。如果是笑話或幹話，就挑跟笑點有關、看了會心一笑的東西或動物，例如 big handbag、sleepy cat。' : '';
+  const photoAsk = wantPhoto ? '\n這篇會配一張用手機隨手拍的照片：寫完貼文後，另起最後一行寫「PHOTO: 」加上 8 到 20 個英文單字，具體描述照片畫面，要跟貼文內容一致（例如貼文說客廳很亂，就寫 messy living room with clothes and snack bags on the sofa）。不要拍到人臉、不要有文字或品牌。' : '';
   const out = await generate(env, system, prompts[style] + photoAsk, style === 'banter' ? 80 : 220, model);
   if (out && !REFUSAL.test(out)) {
     const lines = out.replace(/^["「『]|["」』]$/g, '').trim().split('\n');
@@ -159,16 +173,21 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   if (!text) { await toBack.run(); return null; }
   // 照片找不到就只發文字，不影響發文
   const photoQuery = query || (news ? topicQuery(`${news.title}${news.description || ''}`) : style === 'topic' ? 'video game controller' : topicQuery(`${board?.name || ''}${board?.description || ''}${a.persona}`));
-  const photo = wantPhoto ? await findPhoto(env, photoQuery).catch(() => null) : null;
-  // 約 4 成再加第二張
-  const photo2 = photo && Math.random() < 0.4 ? await findPhoto(env, photoQuery, undefined, [photo.creditUrl]).catch(() => null) : null;
-  const images = photo ? JSON.stringify([photo.key, ...(photo2 ? [photo2.key] : [])]) : null;
-  const credit = photo ? (photo2 && photo2.credit !== photo.credit ? `${photo.credit}、${photo2.credit}` : photo.credit) : null;
+  // 新聞文：用新聞網站自己提供的縮圖（連結預覽），有縮圖就不另外配照片
+  const linkImage = news ? await ogImage(news.url) : null;
+  // 圖片一律用 AI 生成，跟貼文內容一致；不使用別人的照片。新聞文用新聞網站的連結縮圖
+  // 熱門遊戲話題不能畫出遊戲本身（會畫錯、也不該假冒遊戲畫面），只拍玩家在家玩遊戲的情境
+  const imgPrompt = style === 'topic' ? 'cozy living room at night, game controller on the couch, TV screen glowing with colorful light, blurred screen, no recognizable game' : photoQuery;
+  const k1 = wantPhoto && !news ? await aiImage(env, imgPrompt) : null;
+  const k2 = k1 && Math.random() < 0.3 ? await aiImage(env, `${imgPrompt}, different angle`) : null;
+  const photo = k1 ? { key: k1, credit: null as string | null, creditUrl: null as string | null } : null;
+  const images = k1 ? JSON.stringify([k1, ...(k2 ? [k2] : [])]) : null;
+  const credit: string | null = null;
   const id = newId();
   const t = now();
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO posts (id, user_id, text, image_key, images, image_credit, image_credit_url, link_url, link_title, link_site, community_id, sensitive, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'content', ?)`)
-      .bind(id, a.id, text.slice(0, 1000), photo?.key ?? null, images, credit ? credit.slice(0, 160) : null, photo?.creditUrl ?? null, news?.url ?? null, news?.title ?? null, news ? siteOf(news.url, news.source) : null, board?.id ?? null, style === 'adult' ? 1 : 0, t),
+    env.DB.prepare(`INSERT INTO posts (id, user_id, text, image_key, images, image_credit, image_credit_url, link_url, link_title, link_site, link_image, community_id, sensitive, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'content', ?)`)
+      .bind(id, a.id, text.slice(0, 1000), photo?.key ?? null, images, null, photo?.creditUrl ?? null, news?.url ?? null, news?.title ?? null, news ? siteOf(news.url, news.source) : null, linkImage, board?.id ?? null, style === 'adult' ? 1 : 0, t),
     env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(t, a.id),
     ...(board ? [env.DB.prepare('UPDATE communities SET post_count = post_count + 1 WHERE id = ?').bind(board.id)] : []),
   ]);
