@@ -409,7 +409,7 @@ function badgeRow(badges) {
 // ---------- 路由 ----------
 routes.push(
   [/^\/bookmarks$/, () => bookmarksPage()],
-  [/^\/communities$/, () => communitiesPage()],
+  [/^\/(?:communities|c)\/?$/, () => communitiesPage()],
   [/^\/c\/([a-z0-9-]+)$/, (m) => communityPage(m[1])],
   [/^\/moderation$/, () => moderationPage()],
   [/^\/transparency$/, () => transparencyPage()],
