@@ -226,8 +226,9 @@ async function postShare(env: Env, model: string, a: Account, item: NewsItem, bo
 /** 分享一部 YouTube 影片：只根據標題講一兩句感想，不捏造影片內容 */
 async function postVideo(env: Env, model: string, a: Account, v: Video, boards: Board[], toBack: D1PreparedStatement): Promise<string | null> {
   const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。`;
+  const english = !/[\u4e00-\u9fff]/.test(v.title);
   const prompt = `你要在社群分享一部 YouTube 影片。影片標題：「${v.title}」（頻道：${v.channel}）。
-用 1 到 2 句話、10 到 50 個字寫分享時的感想或問大家的看法，像真人轉貼影片時隨手打的字。
+${english ? '標題是英文：先用一句中文說明這是什麼影片（例如「國外大神整理的 GTA6 新手必學技巧」），再加一句自己的看法或問大家，總共 20 到 70 個字。遊戲專有名詞可以保留英文。' : '用 1 到 2 句話、10 到 50 個字寫分享時的感想或問大家的看法，像真人轉貼影片時隨手打的字。'}
 只能根據標題講，不要假裝看過影片細節、不要捏造數字或內容；如果跟股票有關，不要給買賣建議。不要附網址。`;
   const out = await generate(env, system, prompt, 120, model);
   if (!out || REFUSAL.test(out)) { await toBack.run(); return null; }
@@ -264,7 +265,7 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   const vRatio = Math.max(0, Math.min(60, Number(s.video_ratio ?? 15)));
   if (!news && Math.random() * 100 < vRatio) {
     const groups = a.content_group === 'game' ? ['game'] : a.content_group === 'fun' ? ['ent'] : a.content_group === 'mixed' ? ['game', 'tech', 'news', 'finance', 'ent'] : ['news', 'tech', 'finance'];
-    const kws = ['GTA', '俠盜', '黃仁勳', 'Jensen', 'NVIDIA', '輝達', '台股', '股市', '台積電', 'BTS', '防彈', 'G-DRAGON', 'GD', 'BIGBANG', 'BLACKPINK', ...hotTopics(s).map((t) => t.name)];
+    const kws = ['GTA', 'Grand Theft Auto', '俠盜', '黃仁勳', 'Jensen', 'NVIDIA', '輝達', '台股', '股市', '台積電', 'BTS', '防彈', 'G-DRAGON', 'GD', 'BIGBANG', 'BLACKPINK', ...hotTopics(s).map((t) => t.name)];
     const v = await takeVideo(env, groups, kws);
     if (v) return postVideo(env, model, a, v, boards, toBack);
   }
@@ -397,9 +398,9 @@ async function runCommentTick(env: Env, s: Record<string, string>) {
   const max = Math.max(min, Number(s.comment_max ?? 50));
   if (!max) return;
   const posts = await env.DB.prepare(
-    `SELECT p.id, p.text, p.comment_count, p.created_at, p.sensitive, p.user_id FROM posts p JOIN users u ON u.id = p.user_id
+    `SELECT p.id, p.text, p.link_title, p.comment_count, p.created_at, p.sensitive, p.user_id FROM posts p JOIN users u ON u.id = p.user_id
      WHERE p.source = 'content' AND u.is_content = 1 AND p.hidden = 0 AND p.kind = 'post' AND p.created_at > ? ORDER BY p.created_at DESC LIMIT 300`
-  ).bind(now() - 48 * 3600_000).all<{ id: string; text: string; comment_count: number; created_at: number; sensitive: number; user_id: string }>();
+  ).bind(now() - 48 * 3600_000).all<{ id: string; text: string; comment_count: number; created_at: number; sensitive: number; user_id: string; link_title: string | null }>();
   // 依「還差幾則」排序，差最多的先留（加一點隨機），每分鐘最多 12 則
   const due = posts.results.map((p) => {
     const target = commentTarget(p.id, min, max);
@@ -415,17 +416,26 @@ async function runCommentTick(env: Env, s: Record<string, string>) {
     if (!a) continue;
     await env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(now(), a.id).run();
     // 三成機率回覆底下已有的留言
-    const parent = Math.random() < 0.3 ? await env.DB.prepare('SELECT id, text FROM comments WHERE post_id = ? AND parent_id IS NULL ORDER BY RANDOM() LIMIT 1').bind(p.id).first<{ id: string; text: string }>() : null;
+    // 只回覆有內容的留言（8 個字以上），不在「真的」「天啊」這種短留言底下疊樓
+    const parent = Math.random() < 0.25 ? await env.DB.prepare('SELECT id, text FROM comments WHERE post_id = ? AND parent_id IS NULL AND length(text) >= 8 ORDER BY RANDOM() LIMIT 1').bind(p.id).first<{ id: string; text: string }>() : null;
+    const recent = (await env.DB.prepare('SELECT text FROM comments WHERE post_id = ? ORDER BY created_at DESC LIMIT 8').bind(p.id).all<{ text: string }>()).results.map((r) => r.text);
     let text: string | null = null;
-    if (Math.random() < 0.65) {
-      text = pick(p.sensitive ? QUICK_ADULT.concat(QUICK) : /笑|梗|為什麼|因為/.test(p.text) ? QUICK_JOKE.concat(QUICK) : QUICK);
+    // 罐頭短留言只用在頂層、比例很低，而且同一篇不重複
+    if (!parent && Math.random() < 0.2) {
+      const pool = (p.sensitive ? QUICK_ADULT.concat(QUICK) : /笑|梗|為什麼|因為/.test(p.text) ? QUICK_JOKE.concat(QUICK) : QUICK).filter((q) => !recent.includes(q));
+      text = pool.length ? pick(pool) : null;
     } else {
       const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，個性：${a.persona}。`;
+      const style = pick(['接著貼文的某個細節說自己的經驗', '針對內容提出一個具體的問題', '給一個實際的小建議', '輕鬆吐槽其中一個點', '說自己不同的看法（客氣地）', '補充一個相關的生活小事']);
+      const ban = '不要用「天啊」「同感」「真的」「笑死」「大家一定要看」「我看過了」「可以分享一下嗎」這種空泛的話；不要假裝看過影片或文章全文；不要重複別人說過的話';
       const ask = parent
-        ? `貼文：${p.text.slice(0, 200)}\n有人留言：${parent.text.slice(0, 100)}\n請回覆這則留言，像台灣網友一樣，3 到 25 個字，只寫回覆內容。用台灣常見的口語，不要用罕見字、成語或大陸用語，句子要通順看得懂。`
-        : `在這篇貼文底下留言，像台灣網友一樣自然回應，3 到 25 個字，只寫留言內容。用台灣常見的口語，不要用罕見字、成語或大陸用語，句子要通順看得懂：\n${p.text.slice(0, 300)}`;
-      const out = await generate(env, system, ask, 60, model);
-      if (out && !REFUSAL.test(out) && !SIMPLIFIED.test(out)) text = toTaiwan(out.replace(/^["「『]|["」』]$/g, '').trim());
+        ? `貼文：${p.text.slice(0, 200)}\n有人留言：「${parent.text.slice(0, 100)}」\n請針對這則留言的內容回覆，像台灣網友聊天，5 到 30 個字。${ban}。只寫回覆內容。`
+        : `貼文：${p.text.slice(0, 300)}${p.link_title ? `\n（貼文附的連結標題：${p.link_title}）` : ''}\n底下已經有人說：${recent.slice(0, 5).map((r) => `「${r}」`).join('、') || '（還沒有人留言）'}\n請你${style}，像台灣網友留言，5 到 30 個字，一定要提到貼文裡的具體內容。${ban}。只寫留言內容。`;
+      const out = await generate(env, system, ask, 80, model);
+      if (out && !REFUSAL.test(out) && !SIMPLIFIED.test(out)) {
+        const c = toTaiwan(out.replace(/^["「『]|["」』]$/g, '').trim());
+        if (!/大家一定要看|我看過了|可以分享一下嗎|一定要看/.test(c) && !recent.includes(c)) text = c;
+      }
     }
     if (!text) continue;
     await addComment(env, p.id, a, text.slice(0, 120), parent?.id ?? null);

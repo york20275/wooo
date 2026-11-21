@@ -2,7 +2,7 @@ import type { Env } from './env';
 import { now } from './env';
 
 /** ✦ 帳號分享影片用的 YouTube 頻道（官方頻道的公開 RSS，不需要金鑰） */
-export interface Channel { id: string; name: string; group: 'game' | 'tech' | 'news' | 'finance' | 'ent' }
+export interface Channel { id: string; name: string; group: 'game' | 'tech' | 'news' | 'finance' | 'ent'; only?: RegExp }
 export const DEFAULT_CHANNELS: Channel[] = [
   { id: 'UC6VcWc1rAoWdBCM0JxrRQ3A', name: 'Rockstar Games', group: 'game' },
   { id: 'UCKy1dAqELo0zrOtPkf0eTMw', name: 'IGN', group: 'game' },
@@ -14,6 +14,18 @@ export const DEFAULT_CHANNELS: Channel[] = [
   { id: 'UCexpzYDEnfmAvPSfG4xbcjA', name: '公視新聞網', group: 'news' },
   { id: 'UCWLpLjjiDrH8gkOUJmB7DSw', name: '中央社', group: 'news' },
   { id: 'UCYIVkruUoN04UjV9pkBTswg', name: '非凡電視', group: 'finance' },
+  // GTA 攻略、心得頻道：只收標題跟 GTA 有關的影片
+  { id: 'UCuWcjpKbIDAbZfHoru1toFg', name: 'GTA Series Videos', group: 'game', only: /GTA|Grand Theft Auto/i },
+  { id: 'UCcZ3sRk9z6jjgfYQbMGTpig', name: 'Broughy1322', group: 'game', only: /GTA|Grand Theft Auto/i },
+  { id: 'UChLDRvS2OeJ0f5Xi2j7uofA', name: 'TGG', group: 'game', only: /GTA|Grand Theft Auto/i },
+  { id: 'UCWBA1-H9A5IldSb3tNwQmtQ', name: 'PowerPyx', group: 'game', only: /GTA|Grand Theft Auto/i },
+  { id: 'UC0PMQXAwF6O6aeTpv962miA', name: 'MrBossFTW', group: 'game', only: /GTA|Grand Theft Auto/i },
+  { id: 'UC8sFtiTkQ3Sduf3-7TqFNhQ', name: 'gtagram', group: 'game', only: /GTA|Grand Theft Auto/i },
+  { id: 'UCCcYXmK1yjh_34e_-WwWwVw', name: 'Speirs Gaming', group: 'game', only: /GTA|Grand Theft Auto/i },
+  { id: 'UC1PhTs67PPip_Ys0_xmk8Bg', name: 'GhillieMaster', group: 'game', only: /GTA|Grand Theft Auto/i },
+  { id: 'UCbu2SsF-Or3Rsn3NxqODImw', name: 'GameSpot', group: 'game', only: /GTA|Grand Theft Auto/i },
+  { id: 'UC-2Y8dQb0S6DtpxNgAKoJKA', name: 'PlayStation', group: 'game', only: /GTA|Grand Theft Auto/i },
+  { id: 'UC9sbkOLjDXRdxhF7VpHG-cQ', name: 'PlayStation Taiwan', group: 'game' },
   { id: 'UC3IZKseVpdzPSBaWxBxundA', name: 'HYBE LABELS', group: 'ent' },
   { id: 'UCLkAepWjdylmXSltofFvsYQ', name: 'BANGTANTV', group: 'ent' },
   { id: 'UCzw-C7fNfs018R1FzIKnlaA', name: 'BIGBANG', group: 'ent' },
@@ -47,7 +59,7 @@ export async function fetchVideos(env: Env, channels: Channel[] = DEFAULT_CHANNE
         const title = decode(e.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '');
         const pub = Date.parse(e.match(/<published>([^<]+)<\/published>/)?.[1] || '') || now();
         // 跳過短片（#shorts）與太舊的影片（超過 5 天）
-        if (!id || !title || /#shorts/i.test(title) || now() - pub > 5 * 86400_000) return null;
+        if (!id || !title || /#shorts/i.test(title) || now() - pub > 5 * 86400_000 || (ch.only && !ch.only.test(title))) return null;
         return env.DB.prepare('INSERT OR IGNORE INTO video_cache (id, title, channel, grp, published_at, fetched_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id, title.slice(0, 200), ch.name, ch.group, pub, now());
       }).filter(Boolean) as D1PreparedStatement[];
       let got = 0;
