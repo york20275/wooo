@@ -7,7 +7,7 @@ import { aiImage, assignAvatars, findPhoto } from './photos';
 import { migrate } from './migrate';
 import { serverStats } from './monitor';
 import { runIssuePoll } from './features';
-import { fetchVideos } from './videos';
+import { DEFAULT_CHANNELS, fetchVideos } from './videos';
 import { HttpError, deletePost } from './api';
 import { deleteUserData } from './social';
 import { runPostTick, fetchNews, dailyPosts, seedCommenters, shareUrl, pageMeta, purgeGenericComments } from './content';
@@ -365,7 +365,7 @@ admin.post('/content/share-url', async (c) => {
 
 admin.post('/content/issue-poll', async (c) => c.json(await runIssuePoll(c.env, true)));
 
-admin.post('/content/fetch-videos', async (c) => { const report: string[] = []; const added = await fetchVideos(c.env, undefined, report); return c.json({ added, report }); });
+admin.post('/content/fetch-videos', async (c) => { const part = Number(c.req.query('part') ?? 0); const report: string[] = []; const added = await fetchVideos(c.env, DEFAULT_CHANNELS.filter((_, i) => i % 2 === part), report); return c.json({ added, report }); });
 
 admin.get('/server', async (c) => c.json(await serverStats(c.env)));
 

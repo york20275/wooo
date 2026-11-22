@@ -6,7 +6,7 @@ import { addComment, addLike } from './api';
 import { aiImage, assignAvatars, splitPhotoLine, topicQuery } from './photos';
 import { cleanupStories, runDailyPoll, runIssuePoll } from './features';
 import { migrate } from './migrate';
-import { fetchVideos, takeVideo, type Video } from './videos';
+import { DEFAULT_CHANNELS, fetchVideos, takeVideo, type Video } from './videos';
 
 export const fetchNews = fetchNewsImpl;
 export const GROUPS = ['news', 'game', 'mixed', 'fun'] as const;
@@ -514,7 +514,8 @@ export async function handleCron(env: Env, _cron: string) {
   const d = new Date();
   const m = d.getUTCMinutes();
   if (m === 0 || m === 30) await fetchNewsImpl(env).catch(() => {});
-  if (m === 15 || m === 45) await fetchVideos(env).catch((e) => console.log('videos', String(e)));
+  // 頻道分兩批抓（免費方案每次最多 50 個對外請求）
+  if (m === 15 || m === 45) await fetchVideos(env, DEFAULT_CHANNELS.filter((_, i) => i % 2 === (m === 15 ? 0 : 1))).catch((e) => console.log('videos', String(e)));
   // 每日投票：台灣時間 10:00 起每 10 分鐘檢查一次（今天發過就跳過）
   if (d.getUTCHours() >= 2 && d.getUTCHours() < 14 && m % 10 === 0) await runDailyPoll(env).catch((e) => console.log('daily poll', String(e)));
   // 議題投票：台灣時間 12:00 起每 10 分鐘檢查一次
