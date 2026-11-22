@@ -488,13 +488,13 @@ export async function runHoroscope(env: Env, force = false) {
   if (!force && (await env.DB.prepare("SELECT 1 FROM posts WHERE user_id = 'u_horoscope' AND text LIKE ?").bind(`🔮 ${label}%`).first())) return { skipped: '今天已經發過' };
   const prompt = `寫今天（${label}）的 12 星座運勢，給台灣社群網站的大家看，僅供娛樂。
 每個星座一行，格式：「星座名：一句運勢（15 到 28 個字，具體、生活化、有點幽默，例如工作、感情、財運、人際的小提醒）｜幸運色：○」
-照這個順序寫：${SIGNS.map((x) => x.split(' ')[1]).join('、')}。只輸出這 12 行，不要開場白。不要寫恐嚇或負面到讓人不舒服的內容。`;
+照這個順序寫：${SIGNS.map((x) => x.split(' ')[1]).join('、')}。只輸出這 12 行，不要開場白。不要寫恐嚇或負面到讓人不舒服的內容。不要提到任何節日或特定日期（除非今天真的是那個節日）。`;
   let lines: string[] = [];
-  for (let i = 0; i < 2 && lines.length < 12; i++) {
-    const out = await generate(env, BASE_RULES, prompt, 900, s.ai_model || env.AI_MODEL);
+  for (let i = 0; i < 3 && lines.length < 12; i++) {
+    const out = await generate(env, BASE_RULES, prompt, 1600, s.ai_model || env.AI_MODEL);
     if (!out || SIMPLIFIED.test(out)) continue;
     const got = SIGNS.map((sg) => { const name = sg.split(' ')[1]; const m = out.match(new RegExp(`${name}[:：]\\s*(.+)`)); return m ? `${sg}：${toTaiwan(m[1].trim().replace(/\s+｜/g, '｜')).slice(0, 90)}` : ''; });
-    if (got.every(Boolean)) lines = got;
+    if (got.every((x) => x && /幸運色：\S/.test(x))) lines = got;
   }
   if (lines.length < 12) return { error: 'AI 沒有寫齊 12 星座，這次跳過' };
   const board = await env.DB.prepare("SELECT id FROM communities WHERE slug = 'life'").first<{ id: string }>();
