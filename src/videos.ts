@@ -2,7 +2,7 @@ import type { Env } from './env';
 import { now } from './env';
 
 /** ✦ 帳號分享影片用的 YouTube 頻道（官方頻道的公開 RSS，不需要金鑰） */
-export interface Channel { id: string; name: string; group: 'game' | 'tech' | 'news' | 'finance' | 'ent'; only?: RegExp }
+export interface Channel { id: string; name: string; group: 'game' | 'tech' | 'news' | 'finance' | 'ent' | 'sports' | 'world'; only?: RegExp }
 export const DEFAULT_CHANNELS: Channel[] = [
   { id: 'UC6VcWc1rAoWdBCM0JxrRQ3A', name: 'Rockstar Games', group: 'game' },
   { id: 'UCKy1dAqELo0zrOtPkf0eTMw', name: 'IGN', group: 'game' },
@@ -37,6 +37,27 @@ export const DEFAULT_CHANNELS: Channel[] = [
   { id: 'UCX157UE-NdaUGQJDkQ-XKnw', name: 'ETtoday星光雲', group: 'ent' },
   { id: 'UCmyVDKnXwdw3McUlcijqmvQ', name: '東森娛樂', group: 'ent' },
   { id: 'UCRXiA3h1no_PFkb1JCP0yMA', name: 'Vogue', group: 'ent' },
+  { id: 'UCweOkPb1wVVH0Q0Tlj4a5Pw', name: '1theK', group: 'ent' },
+  { id: 'UCmURbJCSXtcOKUCSYsWgc9Q', name: 'Soompi', group: 'ent' },
+  { id: 'UC9uc0fNA59Cm90Pr6cEZxCQ', name: 'allkpop', group: 'ent' },
+  // 體育
+  { id: 'UCWJ2lWNubArHWmf3FIHbfcQ', name: 'NBA', group: 'sports' },
+  { id: 'UCoLrcjPV5PbUrUyXq5mjc_A', name: 'MLB', group: 'sports' },
+  { id: 'UCvG1YV_mtwj1crgE0vvEYgA', name: '愛爾達體育', group: 'sports' },
+  { id: 'UC3P83RUWwKbZ4bkhNti4ZuQ', name: '緯來體育台', group: 'sports' },
+  { id: 'UC-UXjExO348UiOCxazH69hA', name: 'WBSC', group: 'sports' },
+  { id: 'UCG5qGWdu8nIRZqJ_GgDwQ-w', name: 'Premier League', group: 'sports' },
+  { id: 'UCpcTrCXblq78GZrTUTLWeBw', name: 'FIFA', group: 'sports' },
+  { id: 'UCY_5h5zaSwN7Or4kIJDYNXA', name: 'ATP Tour', group: 'sports' },
+  { id: 'UCiWLfSweyRNmLpgEHekhoAg', name: 'ESPN', group: 'sports' },
+  // 財經
+  { id: 'UCrp_UI8XtuYfpiqluWLD7Lw', name: 'CNBC Television', group: 'finance' },
+  { id: 'UCUf0UEBbcGp6Qf1qC0l0snQ', name: '三立財經 Set Money', group: 'finance' },
+  // 國際新聞
+  { id: 'UC16niRr50-MSBwiO3YDb3RA', name: 'BBC News', group: 'world' },
+  { id: 'UCknLrEdhRCp1aegoMqRaCZg', name: 'DW News', group: 'world' },
+  { id: 'UCNye-wNBqNL5ZzHSJj3l8Bg', name: 'Al Jazeera English', group: 'world' },
+  { id: 'UCupvZG-5ko_eiXAupbDfxWw', name: 'CNN', group: 'world' },
 ];
 
 export interface Video { id: string; title: string; channel: string; grp: string }

@@ -156,6 +156,9 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
   return pick(style === 'banter' ? ['好想下班', '今天也是廢廢的一天', '肚子餓到可以吃下一頭牛'] : style === 'joke' ? ['為什麼海很鹹？因為魚在裡面流汗。'] : [`${twNow()}，又是想窩著什麼都不做的時刻。大家現在在做什麼？`]);
 }
 
+const SPORTS = /棒球|籃球|足球|網球|羽球|排球|高爾夫|中職|職棒|MLB|NBA|PLG|TPBL|大谷|世界棒球|經典賽|奧運|亞運|英超|世界盃|球員|球隊|教練|全壘打|比賽|冠軍賽|季後賽|總冠軍|戰績|運動員|馬拉松|F1|賽車/i;
+const MONEY = /台股|美股|股市|股價|加權指數|大盤|ETF|台積電|輝達|NVIDIA|那斯達克|道瓊|標普|外資|投信|殖利率|升息|降息|聯準會|Fed|匯率|新台幣|美元|通膨|財報|營收|法說會|除息|漲停|跌停|期貨|比特幣|加密貨幣/i;
+const WORLD = /美國|中國|日本|南韓|北韓|俄羅斯|烏克蘭|以色列|伊朗|加薩|歐盟|英國|法國|德國|印度|川普|拜登|普丁|習近平|聯合國|北約|白宮|國際/;
 const ENT = /BTS|防彈|BIGBANG|G-DRAGON|GD|BLACKPINK|IVE|aespa|NewJeans|K-?POP|韓團|偶像|演唱會|明星|歌手|藝人|影后|影帝|金曲|金馬|時尚|走秀|粉絲見面會|專輯|MV/i;
 const POLITICAL = /選舉|選戰|候選人|參選|市長|縣長|議員|立委|立法院|總統|政見|政黨|國民黨|民進黨|民眾黨|時代力量|藍營|綠營|白營|罷免|公投|投票日|拜票|造勢|辯論會/;
 
@@ -227,7 +230,9 @@ ${SHARE_FORMAT}`;
   const text = `${fixTypos(ps.title)}\n${say}${ps.tags.length ? `\n${ps.tags.join(' ')}` : ''}`;
   const linkImage = await ogImage(item.url);
   const ent = ENT.test(item.title + (item.description || ''));
-  const board = (political ? boards.find((b) => b.name === '政治議題') : ent ? boards.find((b) => b.name === '追星娛樂') : null) || boards.find((b) => b.content_group === (political ? 'news' : a.content_group)) || boards.find((b) => b.content_group === 'news') || null;
+  const blob = item.title + (item.description || '');
+  const special = political ? '政治議題' : ent ? '追星娛樂' : SPORTS.test(blob) ? '運動體壇' : MONEY.test(blob) ? '股市財經' : WORLD.test(blob) ? '國際新聞' : '';
+  const board = (special ? boards.find((b) => b.name === special) : null) || boards.find((b) => b.content_group === (political ? 'news' : a.content_group)) || boards.find((b) => b.content_group === 'news') || null;
   const id = newId();
   const t = now();
   await env.DB.batch([
@@ -254,7 +259,8 @@ ${SHARE_FORMAT}
   const say = await reviewPost(env, model, fixTypos(ps.say), `影片標題：${v.title}`);
   if (!say) { await toBack.run(); return null; }
   const text = `${fixTypos(ps.title)}\n${say}${ps.tags.length ? `\n${ps.tags.join(' ')}` : ''}`;
-  const board = (v.grp === 'game' ? boards.find((b) => b.content_group === 'game') : v.grp === 'ent' ? boards.find((b) => b.name === '追星娛樂') : boards.find((b) => b.content_group === 'news')) || null;
+  const byGrp: Record<string, string> = { ent: '追星娛樂', sports: '運動體壇', finance: '股市財經', world: '國際新聞' };
+  const board = (v.grp === 'game' ? boards.find((b) => b.content_group === 'game') : byGrp[v.grp] ? boards.find((b) => b.name === byGrp[v.grp]) : boards.find((b) => b.content_group === 'news')) || boards.find((b) => b.content_group === 'news') || null;
   const id = newId();
   const t = now();
   await env.DB.batch([
@@ -284,7 +290,7 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   // 分享影片：遊戲帳號分享遊戲影片，時事／綜合帳號分享新聞、科技、財經影片（像脆上大家轉貼影片聊時事）
   const vRatio = Math.max(0, Math.min(60, Number(s.video_ratio ?? 15)));
   if (!news && Math.random() * 100 < vRatio) {
-    const groups = a.content_group === 'game' ? ['game'] : a.content_group === 'fun' ? ['ent'] : a.content_group === 'mixed' ? ['game', 'tech', 'news', 'finance', 'ent'] : ['news', 'tech', 'finance'];
+    const groups = a.content_group === 'game' ? ['game'] : a.content_group === 'fun' ? ['ent', 'sports'] : a.content_group === 'mixed' ? ['game', 'tech', 'news', 'finance', 'ent', 'sports', 'world'] : ['news', 'tech', 'finance', 'world', 'sports'];
     const kws = ['GTA', 'Grand Theft Auto', '俠盜', '黃仁勳', 'Jensen', 'NVIDIA', '輝達', '台股', '股市', '台積電', 'BTS', '防彈', 'G-DRAGON', 'GD', 'BIGBANG', 'BLACKPINK', ...hotTopics(s).map((t) => t.name)];
     const v = await takeVideo(env, groups, kws);
     if (v) return postVideo(env, model, a, v, boards, toBack);
@@ -293,6 +299,9 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   let board = chooseBoard(boards, a, !!news);
   if (news && POLITICAL.test(news.title + (news.description || ''))) board = boards.find((b) => b.name === '政治議題') || board;
   else if (news && ENT.test(news.title + (news.description || ''))) board = boards.find((b) => b.name === '追星娛樂') || board;
+  else if (news && SPORTS.test(news.title + (news.description || ''))) board = boards.find((b) => b.name === '運動體壇') || board;
+  else if (news && MONEY.test(news.title + (news.description || ''))) board = boards.find((b) => b.name === '股市財經') || board;
+  else if (news && WORLD.test(news.title + (news.description || ''))) board = boards.find((b) => b.name === '國際新聞') || board;
   let headlines: string[] = [];
   if (style === 'topic' && topic) {
     board = (topic.board === 'news' ? boards.find((b) => b.content_group === 'news') : topic.board === 'ent' ? boards.find((b) => b.name === '追星娛樂') : boards.find((b) => b.content_group === 'game')) || board;
