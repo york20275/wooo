@@ -114,7 +114,8 @@ async function ogImage(url: string): Promise<string | null> {
   } catch { return null; }
 }
 
-async function writePost(env: Env, model: string, a: Account, news: NewsItem | null, wantPhoto = false, board: Board | null = null, style: Style = 'normal', topic: HotTopic | null = null, headlines: string[] = []): Promise<string | null> {
+const TOPIC_ANGLES = ['問大家一個具體的問題', '分享一個小技巧或新手建議', '吐槽一件小事', '跟朋友一起玩的趣事', '對某則新聞標題的看法', '還在猶豫要不要買、問大家意見', '跟前作或其他作品比較的感覺', '一句話的幹話或玩笑', '看到別人討論後的想法', '工作太忙沒時間玩的抱怨'];
+async function writePost(env: Env, model: string, a: Account, news: NewsItem | null, wantPhoto = false, board: Board | null = null, style: Style = 'normal', topic: HotTopic | null = null, headlines: string[] = [], recentTopic: string[] = []): Promise<string | null> {
   const boardLine = board && !news && style !== 'topic' ? `\n這篇發在「${board.name}」分類版（${board.description || board.name}），內容跟這個版有關，但保持你的說話風格。` : '';
   const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。${boardLine}`;
   if (news) {
@@ -137,7 +138,7 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
     ask: `${when}發一則讓大家忍不住想回答的問句貼文，10 到 50 個字。可以是「不懂就問」、求推薦、二選一、你們都怎麼做、有人跟我一樣嗎。問題要具體、跟你的主題有關、真實生活會遇到，不要附答案。`,
     // 脆爆紅的手法：日常裡的小觀察、溫馨或好笑的瞬間，看了想按讚分享
     observe: `${when}分享一個你在日常生活中觀察到的小瞬間，15 到 60 個字：路上、捷運、超商、公司、家裡看到的有趣、溫馨或讓人會心一笑的事。要像真的看到的，寫得口語、有畫面，不要說教、不要提真實人名或店名。`,
-    topic: `${when}最近大家都在聊「${topic?.name}」。用玩家的口吻發一則貼文，可以是心得、吐槽、期待、新手建議或問大家問題，20 到 100 個字，可以加 #${(topic?.name || '').replace(/\s+/g, '')}。
+    topic: `${when}最近大家都在聊「${topic?.name}」。發一則貼文，這次的角度是：${pick(TOPIC_ANGLES)}。15 到 80 個字，可以加 #${(topic?.name || '').replace(/\s+/g, '')}。不要用「終於等到」「終於入手」「買了實體版」「買了數位版」「玩了整整」「趁著週末」這類開頭，開頭要跟下面這些最近的貼文都不一樣：\n${recentTopic.slice(0, 8).map((t) => `- ${t.slice(0, 30)}`).join('\n') || '（無）'}
 具體資訊只能用下面提供的內容與新聞標題，不要捏造名稱、數字、日期、股價或細節；沒提供的就講個人感受、看法或問大家。如果跟股票投資有關，只能聊看法與心情，不能給買賣建議。
 已知資訊：${topic?.facts || ''}${headlines.length ? `\n最近新聞標題：\n${headlines.slice(0, 6).join('\n')}` : ''}`,
   };
@@ -303,18 +304,22 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   else if (news && MONEY.test(news.title + (news.description || ''))) board = boards.find((b) => b.name === '股市財經') || board;
   else if (news && WORLD.test(news.title + (news.description || ''))) board = boards.find((b) => b.name === '國際新聞') || board;
   let headlines: string[] = [];
+  let recentTopic: string[] = [];
   if (style === 'topic' && topic) {
     board = (topic.board === 'news' ? boards.find((b) => b.content_group === 'news') : topic.board === 'ent' ? boards.find((b) => b.name === '追星娛樂') : boards.find((b) => b.content_group === 'game')) || board;
     const kw = (topic.keyword || topic.name).replace(/\s+/g, '').slice(0, 10);
     const r = await env.DB.prepare("SELECT title FROM news_cache WHERE replace(title, ' ', '') LIKE ? ORDER BY fetched_at DESC LIMIT 6").bind(`%${kw}%`).all<{ title: string }>();
     headlines = r.results.map((x) => x.title);
+    recentTopic = (await env.DB.prepare("SELECT text FROM posts WHERE source = 'content' AND text LIKE ? ORDER BY created_at DESC LIMIT 12").bind(`%${kw}%`).all<{ text: string }>()).results.map((x) => x.text);
   }
   if (style === 'adult') board = boards.find((b) => b.id === 'cm_free') || board;
   // 笑話、幹話也配圖（梗圖感的相關照片）；成人梗不配圖
   // 大約 7 成的文附 1～2 張照片（成人梗不配圖，所以其他類型的比例再拉高一點補回來）
   // 熱門話題（GTA6、黃仁勳、台股）不配 AI 圖：畫出來的主機、手把、人物都會跟事實不符
   const wantPhoto = style !== 'adult' && style !== 'topic' && Math.random() * 100 < Math.min(100, photoRatio * 1.25);
-  const raw = await writePost(env, model, a, news, wantPhoto, board, style, topic, headlines);
+  let raw = await writePost(env, model, a, news, wantPhoto, board, style, topic, headlines, recentTopic);
+  // 熱門話題文：開頭跟最近的貼文太像就不發
+  if (raw && style === 'topic' && (/^(終於|剛買|買了|最近買|最近終於)/.test(raw) || recentTopic.some((t) => t.slice(0, 6) === raw!.slice(0, 6)))) raw = null;
   if (!raw) {
     await toBack.run();
     await logContent(env.DB, 'error', a.id, `${a.name}：AI 生成失敗，這次跳過`);
@@ -472,6 +477,37 @@ async function runCommentTick(env: Env, s: Record<string, string>) {
   }
 }
 
+/** 每日星座運勢：專門的 ✦ 帳號每天早上 7 點發一篇 12 星座運勢（娛樂用） */
+const SIGNS = ['♈ 牡羊座', '♉ 金牛座', '♊ 雙子座', '♋ 巨蟹座', '♌ 獅子座', '♍ 處女座', '♎ 天秤座', '♏ 天蠍座', '♐ 射手座', '♑ 摩羯座', '♒ 水瓶座', '♓ 雙魚座'];
+export async function runHoroscope(env: Env, force = false) {
+  const s = await getSettings(env.DB);
+  if (!force && (s.horoscope === '0' || s.content_enabled !== '1')) return { skipped: '已關閉' };
+  await env.DB.prepare("INSERT OR IGNORE INTO users (id, name, handle, is_content, content_group, content_enabled, persona, bio, created_at) VALUES ('u_horoscope', '每日星座運勢', 'daily_horoscope', 1, 'horoscope', 0, '每天早上幫大家看 12 星座運勢，語氣溫暖帶點幽默', '每天早上 7 點更新 12 星座運勢 🔮 僅供娛樂參考', ?)").bind(now()).run();
+  const d = new Date(Date.now() + 8 * 3600_000);
+  const label = `${d.getUTCMonth() + 1}/${d.getUTCDate()}（${'日一二三四五六'[d.getUTCDay()]}）`;
+  if (!force && (await env.DB.prepare("SELECT 1 FROM posts WHERE user_id = 'u_horoscope' AND text LIKE ?").bind(`🔮 ${label}%`).first())) return { skipped: '今天已經發過' };
+  const prompt = `寫今天（${label}）的 12 星座運勢，給台灣社群網站的大家看，僅供娛樂。
+每個星座一行，格式：「星座名：一句運勢（15 到 28 個字，具體、生活化、有點幽默，例如工作、感情、財運、人際的小提醒）｜幸運色：○」
+照這個順序寫：${SIGNS.map((x) => x.split(' ')[1]).join('、')}。只輸出這 12 行，不要開場白。不要寫恐嚇或負面到讓人不舒服的內容。`;
+  let lines: string[] = [];
+  for (let i = 0; i < 2 && lines.length < 12; i++) {
+    const out = await generate(env, BASE_RULES, prompt, 900, s.ai_model || env.AI_MODEL);
+    if (!out || SIMPLIFIED.test(out)) continue;
+    const got = SIGNS.map((sg) => { const name = sg.split(' ')[1]; const m = out.match(new RegExp(`${name}[:：]\\s*(.+)`)); return m ? `${sg}：${toTaiwan(m[1].trim()).slice(0, 60)}` : ''; });
+    if (got.every(Boolean)) lines = got;
+  }
+  if (lines.length < 12) return { error: 'AI 沒有寫齊 12 星座，這次跳過' };
+  const board = await env.DB.prepare("SELECT id FROM communities WHERE slug = 'life'").first<{ id: string }>();
+  const id = newId();
+  const text = `🔮 ${label} 12 星座運勢\n\n${lines.join('\n')}\n\n你的星座今天準不準？留言告訴我 👇\n#星座運勢 #每日運勢`;
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO posts (id, user_id, text, community_id, source, created_at) VALUES (?, 'u_horoscope', ?, ?, 'content', ?)").bind(id, text, board?.id ?? null, now()),
+    env.DB.prepare("UPDATE users SET last_posted_at = ? WHERE id = 'u_horoscope'").bind(now()),
+    ...(board ? [env.DB.prepare('UPDATE communities SET post_count = post_count + 1 WHERE id = ?').bind(board.id)] : []),
+  ]);
+  return { posted: id };
+}
+
 /** 清掉 ✦ 帳號的空泛留言（罐頭短句、6 個字以內、像業配的話），連同底下的回覆，並重算留言數 */
 export async function purgeGenericComments(env: Env) {
   const canned = [...QUICK, ...QUICK_ADULT, ...QUICK_JOKE];
@@ -518,6 +554,8 @@ export async function handleCron(env: Env, _cron: string) {
   if (m === 15 || m === 45) await fetchVideos(env, DEFAULT_CHANNELS.filter((_, i) => i % 2 === (m === 15 ? 0 : 1))).catch((e) => console.log('videos', String(e)));
   // 每日投票：台灣時間 10:00 起每 10 分鐘檢查一次（今天發過就跳過）
   if (d.getUTCHours() >= 2 && d.getUTCHours() < 14 && m % 10 === 0) await runDailyPoll(env).catch((e) => console.log('daily poll', String(e)));
+  // 星座運勢：台灣時間早上 7:00 起每 10 分鐘檢查一次（UTC 23 點）
+  if ((d.getUTCHours() === 23 || d.getUTCHours() === 0) && m % 10 === 2) await runHoroscope(env).catch((e) => console.log('horoscope', String(e)));
   // 議題投票：台灣時間 12:00 起每 10 分鐘檢查一次
   if (d.getUTCHours() >= 4 && d.getUTCHours() < 14 && m % 10 === 5) await runIssuePoll(env).catch((e) => console.log('issue poll', String(e)));
   if (m % 10 === 3) await cleanupStories(env).catch((e) => console.log('stories cleanup', String(e)));
