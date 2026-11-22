@@ -61,8 +61,8 @@ function chooseStyle(s: Record<string, string>, a: Account): { style: Style; top
   }
   const adult = Math.max(0, Math.min(40, Number(s.adult_ratio ?? 10)));
   const w: [Style, number][] = a.content_group === 'fun'
-    ? [['banter', 25], ['joke', 25], ['adult', adult], ['observe', 20], ['ask', 15], ['normal', 15]]
-    : [['banter', 25], ['joke', 15], ['adult', adult], ['ask', 20], ['observe', 15], ['normal', 25]];
+    ? [['banter', 35], ['joke', 20], ['adult', adult], ['observe', 20], ['ask', 15], ['normal', 10]]
+    : [['banter', 35], ['joke', 10], ['adult', adult], ['ask', 20], ['observe', 15], ['normal', 20]];
   let r = Math.random() * w.reduce((n, x) => n + x[1], 0);
   for (const [st, n] of w) { r -= n; if (r <= 0) return { style: st, topic: null }; }
   return { style: 'normal', topic: null };
@@ -128,7 +128,7 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
   }
   const when = `現在是${twNow()}（只是讓你知道時間，不要在開頭寫星期幾或幾點）。`;
   const prompts: Record<Style, string> = {
-    banter: `${when}隨手發一句幹話或廢文，像滑手機時打的碎念：5 到 25 個字，可以很無厘頭、厭世或自嘲，不要 hashtag，不要解釋。`,
+    banter: `${when}隨手發一句生活碎念，像滑手機時隨手打的：10 到 35 個字。要符合現在的時間和大家的日常（上班、下班、熬夜、吃飯、天氣、放假、追劇、滑手機），帶一點自嘲或無奈，讓人看了會心一笑、想回「我也是」。例如：「大人都在睡覺，小孩也都睡了，到底誰還醒著在網路上浪費時間啊」「明明說好今天要早睡，結果又滑到一點」「禮拜一的我跟禮拜五的我根本是兩個人」。不要照抄例子，不要 hashtag，不要解釋。`,
     joke: `${when}講一個很短的笑話、冷笑話或諧音梗，20 到 60 個字，最後一句是笑點，不要解釋笑點。`,
     adult: `${when}寫一個成年人看得懂的黃色梗或雙關笑話，靠諧音、雙關或暗示讓人會心一笑，20 到 60 個字。不能有露骨的性描寫，只能涉及成年人，不要解釋。`,
     normal: a.content_group === 'fun'
