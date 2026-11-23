@@ -1,5 +1,5 @@
 /* 窩Woo！Service Worker：離線外框快取 + 推播通知 */
-const CACHE = 'woo-v4';
+const CACHE = 'woo-v5';
 const SHELL = ['/', '/style.css', '/app.js', '/more.js', '/admin.js', '/manifest.webmanifest', '/icon-192.png'];
 
 self.addEventListener('install', (e) => {
@@ -17,11 +17,11 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(fetch(e.request).catch(() => caches.match('/')));
     return;
   }
-  // 靜態檔：先用快取，背景更新
-  e.respondWith(caches.match(e.request).then((hit) => {
-    const net = fetch(e.request).then((res) => { if (res.ok) caches.open(CACHE).then((c) => c.put(e.request, res.clone())); return res; }).catch(() => hit);
-    return hit || net;
-  }));
+  // 靜態檔：先走網路（每次更新都馬上看到新版），離線時才用快取
+  e.respondWith(fetch(e.request, { cache: 'no-cache' }).then((res) => {
+    if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
+    return res;
+  }).catch(() => caches.match(e.request)));
 });
 
 self.addEventListener('push', (e) => {
