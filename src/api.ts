@@ -315,7 +315,7 @@ api.post('/human/verify', async (c) => {
 
 // ---------- 動態牆 ----------
 api.get('/feed', async (c) => {
-  const tab = c.req.query('tab') === 'following' ? 'following' : 'hot';
+  const tab = c.req.query('tab') === 'following' ? 'following' : c.req.query('tab') === 'latest' ? 'latest' : 'hot';
   const before = Number(c.req.query('before') || 0);
   const u = c.get('user');
   let rows: any[];
@@ -327,6 +327,15 @@ api.get('/feed', async (c) => {
        WHERE ${vis} AND (p.user_id = ? OR p.user_id IN (SELECT followee_id FROM follows WHERE follower_id = ?))
        ${before ? 'AND p.created_at < ?' : ''} ORDER BY p.created_at DESC LIMIT 20`
     ).bind(...vb, u.id, u.id, ...(before ? [before] : [])).all();
+    rows = r.results;
+  } else if (tab === 'latest') {
+    // 最新：所有人的文照時間排（可以只看某個分類版）
+    const [vis, vb] = await visibility(c);
+    const board = c.req.query('board') ? await c.env.DB.prepare('SELECT id FROM communities WHERE slug = ?').bind(c.req.query('board')).first<{ id: string }>() : null;
+    const r = await c.env.DB.prepare(
+      `SELECT ${POST_COLS} FROM posts p JOIN users u ON u.id = p.user_id
+       WHERE ${vis} AND p.kind != 'repost' ${board ? 'AND p.community_id = ?' : ''} ${before ? 'AND p.created_at < ?' : ''} ORDER BY p.created_at DESC LIMIT 20`
+    ).bind(...vb, ...(board ? [board.id] : []), ...(before ? [before] : [])).all();
     rows = r.results;
   } else {
     // 熱門：只算真人讚數，越新越前面；熱門不放敏感內容
