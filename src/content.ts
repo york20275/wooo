@@ -6,6 +6,7 @@ import { addComment, addLike } from './api';
 import { aiImage, assignAvatars, splitPhotoLine, topicQuery } from './photos';
 import { cleanupStories, runDailyPoll, runIssuePoll } from './features';
 import { migrate } from './migrate';
+import { pingIndexNow } from './indexnow';
 import { DEFAULT_CHANNELS, fetchVideos, takeVideo, type Video } from './videos';
 
 export const fetchNews = fetchNewsImpl;
@@ -550,6 +551,8 @@ export async function handleCron(env: Env, _cron: string) {
   const d = new Date();
   const m = d.getUTCMinutes();
   if (m === 0 || m === 30) await fetchNewsImpl(env).catch(() => {});
+  // 每 30 分鐘通知搜尋引擎（IndexNow）收錄新文章
+  if (m === 20 || m === 50) await pingIndexNow(env).catch((e) => console.log('indexnow', String(e)));
   // 頻道分兩批抓（免費方案每次最多 50 個對外請求）
   if (m === 15 || m === 45) await fetchVideos(env, DEFAULT_CHANNELS.filter((_, i) => i % 2 === (m === 15 ? 0 : 1))).catch((e) => console.log('videos', String(e)));
   // 每日投票：台灣時間 10:00 起每 10 分鐘檢查一次（今天發過就跳過）

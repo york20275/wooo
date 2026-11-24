@@ -6,6 +6,7 @@ import { runDailyPoll } from './features';
 import { aiImage, assignAvatars, findPhoto } from './photos';
 import { migrate } from './migrate';
 import { serverStats } from './monitor';
+import { pingIndexNow } from './indexnow';
 import { runIssuePoll } from './features';
 import { DEFAULT_CHANNELS, fetchVideos } from './videos';
 import { HttpError, deletePost } from './api';
@@ -352,6 +353,8 @@ admin.post('/content/avatars-now', async (c) => c.json({ done: await assignAvata
 admin.post('/migrate', async (c) => c.json({ applied: await migrate(c.env) }));
 
 admin.post('/content/purge-generic-comments', async (c) => { const r = await purgeGenericComments(c.env); await logAudit(c.env.DB, c.get('user')!.id, 'purge_comments', null, JSON.stringify(r)); return c.json(r); });
+
+admin.post('/indexnow', async (c) => c.json({ status: await pingIndexNow(c.env) }));
 
 admin.post('/content/horoscope', async (c) => c.json(await runHoroscope(c.env, true)));
 

@@ -1,3 +1,4 @@
+import { INDEXNOW_KEY } from './indexnow';
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import type { AppEnv, Env } from './env';
@@ -83,6 +84,7 @@ app.get('/u/:handle', (c) => withOg(c.env, c.req.raw));
 app.get('/album/:id', (c) => withOg(c.env, c.req.raw));
 app.get('/tag/:tag', (c) => withOg(c.env, c.req.raw));
 app.get('/c/:slug', (c) => withOg(c.env, c.req.raw));
+app.get(`/${INDEXNOW_KEY}.txt`, (c) => c.text(INDEXNOW_KEY));
 app.get('/robots.txt', (c) => c.text(robots(c.env.SITE_URL.startsWith('https://') ? c.env.SITE_URL : new URL(c.req.url).origin), 200, { 'cache-control': 'public, max-age=3600' }));
 app.get('/sitemap.xml', async (c) => c.body(await sitemap(c.env, c.env.SITE_URL.startsWith('https://') ? c.env.SITE_URL : new URL(c.req.url).origin), 200, { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'public, max-age=3600' }));
 
