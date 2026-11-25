@@ -672,7 +672,7 @@ export async function handleCron(env: Env, _cron: string) {
 
 // ---------------- 排程發文佇列 ----------------
 // 事先寫好的文章（含留言）放進佇列，時間到才由 ✦ 帳號發出；完全不用 AI 額度。
-export interface QueueItem { text: string; board?: string; grp?: string; sensitive?: boolean; comments?: string[]; hours?: string }
+export interface QueueItem { text: string; board?: string; grp?: string; sensitive?: boolean; comments?: string[]; hours?: string; at?: string | number }
 
 /** hours 格式「22-2」表示只在台灣時間 22 點到隔天 2 點之間發 */
 function fitHours(t: number, hours?: string) {
@@ -691,13 +691,16 @@ export async function enqueuePosts(env: Env, items: QueueItem[], perDay: number,
   const gap = 86400_000 / Math.max(1, perDay);
   const stmts: D1PreparedStatement[] = [];
   for (const it of items) {
-    t += gap * (0.6 + Math.random() * 0.8);
-    const at = fitHours(t, it.hours);
+    // 有指定日期（例如除夕、初一）就照指定的時間發，不影響其他文章的順序
+    const fixed = it.at ? (typeof it.at === 'number' ? it.at : Date.parse(it.at)) : NaN;
+    if (!Number.isFinite(fixed)) t += gap * (0.6 + Math.random() * 0.8);
+    const at = Number.isFinite(fixed) ? fixed : fitHours(t, it.hours);
     stmts.push(env.DB.prepare('INSERT INTO post_queue (id, text, board_slug, grp, sensitive, comments, hours, publish_at, batch, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .bind(newId(), it.text.slice(0, 1000), it.board || null, it.grp || null, it.sensitive ? 1 : 0, JSON.stringify((it.comments || []).slice(0, 6)), it.hours || null, at, batch, now()));
   }
   for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
-  return { added: stmts.length, until: t };
+  const end = await env.DB.prepare('SELECT MAX(publish_at) AS t FROM post_queue WHERE posted_id IS NULL').first<{ t: number }>();
+  return { added: stmts.length, until: end?.t ?? t };
 }
 
 /** 每分鐘：發出到期的排程文章，並把它的留言排在接下來幾小時陸續出現 */

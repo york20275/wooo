@@ -384,6 +384,10 @@ admin.delete('/content/queue/:id', async (c) => {
   await c.env.DB.prepare('DELETE FROM post_queue WHERE id = ? AND posted_id IS NULL').bind(c.req.param('id')).run();
   return c.json({ ok: true });
 });
+admin.delete('/content/queue-batch/:batch', async (c) => {
+  const r = await c.env.DB.prepare('DELETE FROM post_queue WHERE batch = ? AND posted_id IS NULL').bind(c.req.param('batch')).run();
+  return c.json({ deleted: r.meta.changes || 0 });
+});
 admin.post('/content/queue-import', async (c) => {
   const b = await c.req.json<any>().catch(() => ({}));
   const items = (Array.isArray(b.items) ? b.items : []).filter((x: any) => x && typeof x.text === 'string' && x.text.trim());
