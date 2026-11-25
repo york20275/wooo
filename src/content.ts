@@ -516,7 +516,7 @@ export async function runGamePicks(env: Env, slot: 'studio' | 'indie', force = f
   if (!out || REFUSAL.test(out) || SIMPLIFIED.test(out)) return { error: 'AI 生成失敗' };
   const intro = await reviewPost(env, model, fixTypos(out.replace(/^["「『]|["」』]$/g, '').replace(/https?:\/\/\S+/g, '').trim()), `遊戲：${g.title}\n已知資訊：${g.facts}`);
   if (!intro) return { error: '介紹沒通過檢查' };
-  const tagName = g.title.split(' ')[0].replace(/[：:]/g, '');
+  const tagName = g.title.split(' ')[0].replace(/（.*?）|[：:．・]/g, '');
   const text = `【工作室作品】${g.title}\n${intro}\n#獨立遊戲 #手機遊戲 #${tagName}`;
   const id = newId();
   await env.DB.batch([
