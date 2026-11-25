@@ -702,7 +702,10 @@ export async function enqueuePosts(env: Env, items: QueueItem[], perDay: number,
 
 /** 每分鐘：發出到期的排程文章，並把它的留言排在接下來幾小時陸續出現 */
 export async function runQueue(env: Env) {
-  const due = (await env.DB.prepare('SELECT * FROM post_queue WHERE posted_id IS NULL AND publish_at <= ? ORDER BY publish_at LIMIT 2').bind(now()).all<any>()).results;
+  // 沒指定時段的文，台灣時間凌晨 2～7 點先不發（比較像真人作息）
+  const twHour = new Date(now() + 8 * 3600_000).getUTCHours();
+  const night = twHour >= 2 && twHour < 7;
+  const due = (await env.DB.prepare(`SELECT * FROM post_queue WHERE posted_id IS NULL AND publish_at <= ? ${night ? 'AND hours IS NOT NULL' : ''} ORDER BY publish_at LIMIT ${night ? 2 : 1}`).bind(now()).all<any>()).results;
   for (const q of due) {
     const board = q.board_slug ? await env.DB.prepare('SELECT id FROM communities WHERE slug = ?').bind(q.board_slug).first<{ id: string }>() : null;
     let uid = q.user_id as string | null;
