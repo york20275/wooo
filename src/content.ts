@@ -496,6 +496,7 @@ export async function runGamePicks(env: Env, slot: 'studio' | 'indie', force = f
   const s = await getSettings(env.DB);
   if (!force && (s.game_picks === '0' || s.content_enabled !== '1')) return { skipped: '已關閉' };
   await env.DB.prepare("INSERT OR IGNORE INTO users (id, name, handle, is_content, content_group, content_enabled, persona, bio, created_at) VALUES ('u_gamepicks', '遊戲推坑小站', 'game_picks', 1, 'gamepicks', 0, '熱愛獨立遊戲和網頁遊戲的推坑帳號，語氣輕鬆、會講重點', '推薦各種好玩的遊戲、新作情報與影片 🎮 標示【工作室作品】的是合作工作室 N.A.N_TW_STUDIO 的作品', ?)").bind(now()).run();
+  await env.DB.prepare("UPDATE users SET bio = '推薦各種好玩的遊戲、新作情報與影片 🎮 標示【工作室作品】的是合作工作室 N.A.N_TW_STUDIO 的作品' WHERE id = 'u_gamepicks'").run();
   const a = await env.DB.prepare("SELECT id, name, handle, content_group, persona FROM users WHERE id = 'u_gamepicks'").first<Account>();
   if (!a) return { error: '帳號建立失敗' };
   const boards = (await env.DB.prepare('SELECT id, name, description, content_group FROM communities').all<Board>()).results;
