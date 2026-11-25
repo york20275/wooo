@@ -71,8 +71,8 @@ export async function serverStats(env: Env) {
     by_day: (await env.DB.prepare("SELECT date((created_at + 28800000) / 1000, 'unixepoch') AS day, COUNT(*) AS n FROM users WHERE is_content = 0 AND created_at >= ? GROUP BY 1 ORDER BY 1").bind(now() - 14 * 86400_000).all<{ day: string; n: number }>()).results,
   };
   const aiPostsToday = await n("SELECT COUNT(*) AS n FROM posts WHERE source = 'content' AND created_at >= ?", dayStart);
-  // AI 用量估算：發文約 40 neurons（70B）、留言約一半是罐頭回覆，AI 留言約 3 neurons（8B）
-  const neurons = Math.round(aiPostsToday * 40 + aiComments * 0.55 * 3);
+  // 依 Cloudflare 後台實測校正：每篇發文（含檢查）約 140、每則 AI 留言約 25 neurons（約八成是 AI 寫的）
+  const neurons = Math.round(aiPostsToday * 140 + aiComments * 0.8 * 25);
   return {
     plan: s.cf_plan === 'paid' ? 'paid' : 'free',
     limits: LIMITS,

@@ -464,8 +464,8 @@ async function runCommentTick(env: Env, s: Record<string, string>) {
       const style = pick(['接著貼文的某個細節說自己的經驗', '針對內容提出一個具體的問題', '給一個實際的小建議', '輕鬆吐槽其中一個點', '說自己不同的看法（客氣地）', '補充一個相關的生活小事']);
       const ban = '不要用「天啊」「同感」「真的」「笑死」「大家一定要看」「我看過了」「可以分享一下嗎」這種空泛的話；不要假裝看過影片或文章全文；不要重複別人說過的話';
       const ask = parent
-        ? `貼文：${p.text.slice(0, 200)}\n有人留言：「${parent.text.slice(0, 100)}」\n請針對這則留言的內容回覆，像台灣網友聊天，5 到 30 個字。${ban}。只寫回覆內容。`
-        : `貼文：${p.text.slice(0, 300)}${p.link_title ? `\n（貼文附的連結標題：${p.link_title}）` : ''}\n底下已經有人說：${recent.slice(0, 5).map((r) => `「${r}」`).join('、') || '（還沒有人留言）'}\n請你${style}，像台灣網友留言，5 到 30 個字，一定要提到貼文裡的具體內容。${ban}。只寫留言內容。`;
+        ? `貼文：${p.text.slice(0, 120)}\n有人留言：「${parent.text.slice(0, 80)}」\n請針對這則留言的內容回覆，像台灣網友聊天，5 到 30 個字。${ban}。只寫回覆內容。`
+        : `貼文：${p.text.slice(0, 160)}${p.link_title ? `\n（貼文附的連結標題：${p.link_title}）` : ''}\n底下已經有人說：${recent.slice(0, 3).map((r) => `「${r}」`).join('、') || '（還沒有人留言）'}\n請你${style}，像台灣網友留言，5 到 30 個字，一定要提到貼文裡的具體內容。${ban}。只寫留言內容。`;
       const out = await generate(env, system, ask, 80, model);
       if (out && !REFUSAL.test(out) && !SIMPLIFIED.test(out)) {
         const c = toTaiwan(out.replace(/^["「『]|["」』]$/g, '').trim());
