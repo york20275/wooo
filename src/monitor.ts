@@ -1,5 +1,6 @@
 import type { Env } from './env';
 import { getSettings, now, twDay } from './env';
+import { aiBudget } from './ai';
 
 /** Cloudflare 各方案的每日／總量上限（用來顯示用量百分比） */
 export const LIMITS = {
@@ -72,7 +73,8 @@ export async function serverStats(env: Env) {
   };
   const aiPostsToday = await n("SELECT COUNT(*) AS n FROM posts WHERE source = 'content' AND created_at >= ?", dayStart);
   // 依 Cloudflare 後台實測校正：每篇發文（含檢查）約 140、每則 AI 留言約 25 neurons（約八成是 AI 寫的）
-  const neurons = Math.round(aiPostsToday * 140 + aiComments * 0.8 * 25);
+  const bud = await aiBudget(env);
+  const neurons = Math.round(bud.used);
   return {
     plan: s.cf_plan === 'paid' ? 'paid' : 'free',
     limits: LIMITS,
@@ -80,7 +82,7 @@ export async function serverStats(env: Env) {
     signups,
     users: { online5, online30, active_today: activeToday, real: realUsers, content: contentUsers },
     content: { posts, posts_today: postsToday, comments, comments_today: commentsToday, ai_posts_today: aiPostsToday, ai_comments_today: aiComments, likes, uploads },
-    ai: { neurons_today_est: neurons },
+    ai: { neurons_today_est: neurons, cap: bud.cap },
     cron: { last_run: lastCron, healthy: now() - lastCron < 15 * 60_000 },
     cloudflare: await cloudflareUsage(env),
     time: now(),

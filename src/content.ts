@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { getSettings, logContent, newId, now } from './env';
-import { BASE_RULES, generate } from './ai';
+import { aiBudget, COMMENT_RULES, BASE_RULES, generate } from './ai';
 import { fetchNews as fetchNewsImpl, takeNews, type NewsItem } from './news';
 import { addComment, addLike } from './api';
 import { aiImage, assignAvatars, splitPhotoLine, topicQuery } from './photos';
@@ -456,11 +456,12 @@ async function runCommentTick(env: Env, s: Record<string, string>) {
     const recent = (await env.DB.prepare('SELECT text FROM comments WHERE post_id = ? ORDER BY created_at DESC LIMIT 8').bind(p.id).all<{ text: string }>()).results.map((r) => r.text);
     let text: string | null = null;
     // 罐頭短留言只用在頂層、比例很低，而且同一篇不重複
-    if (!parent && Math.random() < 0.2) {
+    const bud = await aiBudget(env);
+    if (!parent && Math.random() < (bud.ratio > 0.7 ? 0.9 : 0.4)) {
       const pool = (p.sensitive ? QUICK_ADULT.concat(QUICK) : /笑|梗|為什麼|因為/.test(p.text) ? QUICK_JOKE.concat(QUICK) : QUICK).filter((q) => !recent.includes(q));
       text = pool.length ? pick(pool) : null;
     } else {
-      const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，個性：${a.persona}。`;
+      const system = `${COMMENT_RULES}個性：${a.persona.slice(0, 40)}。`;
       const style = pick(['接著貼文的某個細節說自己的經驗', '針對內容提出一個具體的問題', '給一個實際的小建議', '輕鬆吐槽其中一個點', '說自己不同的看法（客氣地）', '補充一個相關的生活小事']);
       const ban = '不要用「天啊」「同感」「真的」「笑死」「大家一定要看」「我看過了」「可以分享一下嗎」這種空泛的話；不要假裝看過影片或文章全文；不要重複別人說過的話';
       const ask = parent
@@ -471,6 +472,8 @@ async function runCommentTick(env: Env, s: Record<string, string>) {
         const c = toTaiwan(out.replace(/^["「『]|["」』]$/g, '').trim());
         if (!/大家一定要看|我看過了|可以分享一下嗎|一定要看/.test(c) && !recent.includes(c)) text = c;
       }
+      // AI 額度用完：頂層留言改用罐頭短句，回覆就跳過
+      if (!text && !parent) { const pool = QUICK.filter((q) => !recent.includes(q)); text = pool.length ? pick(pool) : null; }
     }
     if (!text) continue;
     await addComment(env, p.id, a, text.slice(0, 120), parent?.id ?? null);
@@ -610,6 +613,7 @@ export async function seedCommenters(env: Env) {
 
 export async function handleCron(env: Env, _cron: string) {
   await migrate(env).catch((e) => console.log('migrate', String(e)));
+  if (new Date().getUTCMinutes() === 7) await env.DB.prepare("DELETE FROM settings WHERE key LIKE 'ai_used_%' AND key < ?").bind(`ai_used_${new Date(Date.now() - 3 * 86400_000).toISOString().slice(0, 10)}`).run().catch(() => {});
   await runPostTick(env).catch((e) => console.log('post tick', String(e)));
   await runInteractTick(env).catch((e) => console.log('interact tick', String(e)));
   await assignAvatars(env, 3).catch((e) => console.log('avatars', String(e)));

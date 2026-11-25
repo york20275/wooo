@@ -1,4 +1,5 @@
 import type { Env } from './env';
+import { aiBudget } from './ai';
 import { getSetting, newId } from './env';
 
 /** Pexels 免費圖庫：搜尋照片 → 複製一份到 R2 → 回傳圖片位置與攝影者（顯示在照片下方） */
@@ -146,6 +147,7 @@ async function hasText(env: Env, bin: Uint8Array): Promise<boolean> {
 /** 用 AI 生成一張圖存到 R2（不用別人的照片）。圖裡有文字就重畫，兩次都有就不要圖 */
 export async function aiImage(env: Env, prompt: string, folder = 'c', square = false, debug?: string[]): Promise<string | null> {
   try {
+    if ((await aiBudget(env)).left < 300) { debug?.push('今日 AI 額度不足'); return null; }
     const clean = prompt
       .replace(/\b(man|woman|men|women|person|people|guy|girl|boy|kid|child|children|someone|selfie|hand|hands|face|friend|friends|he|she|his|her)\b/gi, '')
       .replace(/\bgame controller\b/gi, 'gamepad').replace(TEXTY, '').replace(/\s+/g, ' ').replace(/(,\s*)+/g, ', ').trim();

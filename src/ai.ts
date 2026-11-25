@@ -1,9 +1,32 @@
 import type { Env } from './env';
 
-/** 用 Workers AI 生成文字；失敗時回傳 null，由呼叫端改用備用模板 */
+/** 各模型每 100 萬 token 的 neurons（依 Cloudflare 公開價格換算），用來記帳 */
+const RATES: Record<string, [number, number]> = {
+  '@cf/meta/llama-3.3-70b-instruct-fp8-fast': [26668, 204805],
+  '@cf/meta/llama-3.1-8b-instruct-fp8-fast': [4119, 34868],
+  '@cf/meta/llama-4-scout-17b-16e-instruct': [24545, 77273],
+};
+const utcDay = () => new Date().toISOString().slice(0, 10);
+
+/** 今天（Cloudflare 以 UTC 計，台灣時間早上 8 點重置）已用的 neurons 與上限 */
+export async function aiBudget(env: Env) {
+  const r = await env.DB.prepare("SELECT (SELECT value FROM settings WHERE key = ?) AS used, (SELECT value FROM settings WHERE key = 'ai_daily_cap') AS cap").bind(`ai_used_${utcDay()}`).first<{ used: string | null; cap: string | null }>();
+  const used = Number(r?.used || 0), cap = Number(r?.cap || 9000);
+  return { used, cap, left: Math.max(0, cap - used), ratio: cap ? used / cap : 1 };
+}
+export async function addAiUsage(env: Env, model: string, promptTokens: number, completionTokens: number) {
+  const [i, o] = RATES[model] || RATES['@cf/meta/llama-3.3-70b-instruct-fp8-fast'];
+  const n = (promptTokens * i + completionTokens * o) / 1e6;
+  await env.DB.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS REAL) + CAST(excluded.value AS REAL) AS TEXT)").bind(`ai_used_${utcDay()}`, String(n)).run();
+  return n;
+}
+
+/** 用 Workers AI 生成文字；超過每日免費額度上限或失敗時回傳 null，由呼叫端改用備用做法 */
 export async function generate(env: Env, system: string, prompt: string, maxTokens = 320, model?: string): Promise<string | null> {
+  const m = model || env.AI_MODEL;
   try {
-    const res: any = await env.AI.run((model || env.AI_MODEL) as any, {
+    if ((await aiBudget(env)).left <= 0) return null;
+    const res: any = await env.AI.run(m as any, {
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: prompt },
@@ -12,6 +35,9 @@ export async function generate(env: Env, system: string, prompt: string, maxToke
       temperature: 0.9,
     });
     const text = typeof res === 'string' ? res : res?.response;
+    const u = res?.usage;
+    // 沒有回傳用量時，用字數粗估（中文約 1.3 token／字）
+    await addAiUsage(env, m, u?.prompt_tokens ?? Math.ceil((system.length + prompt.length) * 1.3), u?.completion_tokens ?? Math.ceil(String(text || '').length * 1.3)).catch(() => {});
     if (!text || typeof text !== 'string') return null;
     return clean(text);
   } catch (e) {
@@ -19,6 +45,9 @@ export async function generate(env: Env, system: string, prompt: string, maxToke
     return null;
   }
 }
+
+/** 留言用的精簡規則（留言很短，不需要整份發文規則，省額度） */
+export const COMMENT_RULES = '你是台灣社群網站的網友。用台灣繁體中文口語、台灣用語，簡短自然，不要提到 AI，不要引號，不談政治立場、不給投資建議、不寫色情暴力。';
 
 function clean(t: string): string | null {
   let s = t.trim()
