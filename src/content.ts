@@ -213,6 +213,21 @@ function parseShare(out: string, fallbackTitle: string) {
   return { title: title.slice(0, 120), say, tags };
 }
 
+/** AI 額度用完時的轉貼：只放原標題＋自動標籤＋原文連結（不用 AI） */
+async function shareTitleOnly(env: Env, a: Account, url: string, title: string, site: string, image: string | null, boardName: string, boards: Board[], toBack: D1PreparedStatement): Promise<string | null> {
+  if (!title) { await toBack.run(); return null; }
+  const board = (boardName ? boards.find((b) => b.name === boardName) : null) || boards.find((b) => b.content_group === a.content_group) || boards.find((b) => b.content_group === 'news') || null;
+  const id = newId();
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO posts (id, user_id, text, link_url, link_title, link_site, link_image, community_id, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'content', ?)`)
+      .bind(id, a.id, `${title.slice(0, 120)}\n${autoTags(title, '#分享')}`, url, title, site, image, board?.id ?? null, t),
+    env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(t, a.id),
+    ...(board ? [env.DB.prepare('UPDATE communities SET post_count = post_count + 1 WHERE id = ?').bind(board.id)] : []),
+  ]);
+  return id;
+}
+
 /** 分享一篇網路文章：只根據標題與摘要講一兩句看法，附原文連結（不複製文章內容） */
 async function postShare(env: Env, model: string, a: Account, item: NewsItem, boards: Board[], toBack: D1PreparedStatement): Promise<string | null> {
   const political = POLITICAL.test(item.title + (item.description || ''));
@@ -224,7 +239,7 @@ async function postShare(env: Env, model: string, a: Account, item: NewsItem, bo
 看法的部分：${rule}只能根據標題和摘要，不要加入沒提到的事實或數字。
 ${SHARE_FORMAT}`;
   const out = await generate(env, system, prompt, 200, model);
-  if (!out || REFUSAL.test(out) || SIMPLIFIED.test(out)) { await toBack.run(); return null; }
+  if (!out || REFUSAL.test(out) || SIMPLIFIED.test(out)) return shareTitleOnly(env, a, item.url, item.title, siteOf(item.url, item.source), await ogImage(item.url), political ? '政治議題' : ENT.test(item.title) ? '追星娛樂' : '', boards, toBack);
   const ps = parseShare(out, item.title);
   if (!ps.say) { await toBack.run(); return null; }
   const say = await reviewPost(env, model, fixTypos(ps.say), `文章標題：${item.title}\n摘要：${item.description || ''}${political ? '\n（政治新聞：內容必須中立，支持或攻擊任何候選人、政黨就回覆 NO）' : ''}`);
@@ -255,7 +270,7 @@ ${english ? '標題是英文，請翻成自然的中文標題（例如「國外�
 ${SHARE_FORMAT}
 只能根據標題講，不要假裝看過影片細節、不要捏造數字或內容；如果跟股票有關，不要給買賣建議。不要附網址。`;
   const out = await generate(env, system, prompt, 200, model);
-  if (!out || REFUSAL.test(out) || SIMPLIFIED.test(out)) { await toBack.run(); return null; }
+  if (!out || REFUSAL.test(out) || SIMPLIFIED.test(out)) return shareTitleOnly(env, a, `https://www.youtube.com/watch?v=${v.id}`, v.title, `YouTube · ${v.channel}`, `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`, ({ ent: '追星娛樂', sports: '運動體壇', finance: '股市財經', world: '國際新聞' } as Record<string, string>)[v.grp] || '', boards, toBack);
   const ps = parseShare(out, v.title);
   if (!ps.say) { await toBack.run(); return null; }
   const say = await reviewPost(env, model, fixTypos(ps.say), `影片標題：${v.title}`);
@@ -283,7 +298,13 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
     if (!news) { await toBack.run(); return null; }
   }
   // 分享網路文章：附一兩句自己的看法＋文章連結與縮圖（像大家在脆上轉貼新聞聊時事）
-  const shareRatio = Math.max(0, Math.min(80, Number(s.share_ratio ?? 35)));
+  // AI 額度用完：只做不需要 AI 的轉貼（標題＋連結），排程佇列另外照常發
+  const noAi = (await aiBudget(env)).left <= 0;
+  const shareRatio = noAi ? 100 : Math.max(0, Math.min(80, Number(s.share_ratio ?? 35)));
+  if (noAi && Math.random() < 0.5) {
+    const v = await takeVideo(env, ['game', 'ent', 'sports', 'news', 'world', 'finance', 'tech'], []);
+    if (v) return postVideo(env, model, a, v, boards, toBack);
+  }
   if (!news && Math.random() * 100 < shareRatio) {
     // 約三成優先挑選舉／政治新聞（各家新聞都會輪到，內容保持中立），讓政治議題版有話題
     const item = (Math.random() < 0.3 ? await takePolitical(env) : null) || await takeNews(env);
@@ -620,6 +641,7 @@ export async function handleCron(env: Env, _cron: string) {
   const d = new Date();
   const m = d.getUTCMinutes();
   if (m === 0 || m === 30) await fetchNewsImpl(env).catch(() => {});
+  await runQueue(env).catch((e) => console.log('queue', String(e)));
   // 每 30 分鐘通知搜尋引擎（IndexNow）收錄新文章
   if (m === 20 || m === 50) await pingIndexNow(env).catch((e) => console.log('indexnow', String(e)));
   // 頻道分兩批抓（免費方案每次最多 50 個對外請求）
@@ -645,4 +667,79 @@ export async function handleCron(env: Env, _cron: string) {
       env.DB.prepare('DELETE FROM content_log WHERE created_at < ?').bind(now() - 30 * 86400_000),
     ]);
   }
+}
+
+
+// ---------------- 排程發文佇列 ----------------
+// 事先寫好的文章（含留言）放進佇列，時間到才由 ✦ 帳號發出；完全不用 AI 額度。
+export interface QueueItem { text: string; board?: string; grp?: string; sensitive?: boolean; comments?: string[]; hours?: string }
+
+/** hours 格式「22-2」表示只在台灣時間 22 點到隔天 2 點之間發 */
+function fitHours(t: number, hours?: string) {
+  if (!hours) return t;
+  const [a, b] = hours.split('-').map(Number);
+  const inWin = (h: number) => (a <= b ? h >= a && h < b : h >= a || h < b);
+  let x = t;
+  for (let i = 0; i < 48 && !inWin(new Date(x + 8 * 3600_000).getUTCHours()); i++) x += 3600_000;
+  return x;
+}
+
+/** 把一批文章接在佇列最後面，平均分散到之後的日子（每天 perDay 篇，時間隨機打散） */
+export async function enqueuePosts(env: Env, items: QueueItem[], perDay: number, batch = '') {
+  const last = await env.DB.prepare('SELECT MAX(publish_at) AS t FROM post_queue WHERE posted_id IS NULL').first<{ t: number | null }>();
+  let t = Math.max(now() + 5 * 60_000, last?.t || 0);
+  const gap = 86400_000 / Math.max(1, perDay);
+  const stmts: D1PreparedStatement[] = [];
+  for (const it of items) {
+    t += gap * (0.6 + Math.random() * 0.8);
+    const at = fitHours(t, it.hours);
+    stmts.push(env.DB.prepare('INSERT INTO post_queue (id, text, board_slug, grp, sensitive, comments, hours, publish_at, batch, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(newId(), it.text.slice(0, 1000), it.board || null, it.grp || null, it.sensitive ? 1 : 0, JSON.stringify((it.comments || []).slice(0, 6)), it.hours || null, at, batch, now()));
+  }
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  return { added: stmts.length, until: t };
+}
+
+/** 每分鐘：發出到期的排程文章，並把它的留言排在接下來幾小時陸續出現 */
+export async function runQueue(env: Env) {
+  const due = (await env.DB.prepare('SELECT * FROM post_queue WHERE posted_id IS NULL AND publish_at <= ? ORDER BY publish_at LIMIT 2').bind(now()).all<any>()).results;
+  for (const q of due) {
+    const board = q.board_slug ? await env.DB.prepare('SELECT id FROM communities WHERE slug = ?').bind(q.board_slug).first<{ id: string }>() : null;
+    let uid = q.user_id as string | null;
+    if (!uid) {
+      const groups = q.grp ? [q.grp] : ['mixed', 'fun', 'game', 'news'];
+      const a = await env.DB.prepare(`SELECT id FROM users WHERE is_content = 1 AND content_enabled = 1 AND content_group IN (${groups.map(() => '?').join(',')}) ORDER BY COALESCE(last_posted_at, 0) ASC LIMIT 1`).bind(...groups).first<{ id: string }>();
+      uid = a?.id ?? null;
+    }
+    if (!uid) continue;
+    const id = newId();
+    const t = now();
+    const comments: string[] = (() => { try { return JSON.parse(q.comments || '[]'); } catch { return []; } })();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO posts (id, user_id, text, community_id, sensitive, source, created_at) VALUES (?, ?, ?, ?, ?, 'content', ?)").bind(id, uid, q.text, board?.id ?? null, q.sensitive ? 1 : 0, t),
+      env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(t, uid),
+      env.DB.prepare('UPDATE post_queue SET posted_id = ? WHERE id = ?').bind(id, q.id),
+      ...(board ? [env.DB.prepare('UPDATE communities SET post_count = post_count + 1 WHERE id = ?').bind(board.id)] : []),
+      ...comments.map((txt, i) => env.DB.prepare('INSERT INTO comment_queue (id, post_id, text, due_at) VALUES (?, ?, ?, ?)').bind(newId(), id, txt.slice(0, 120), t + (6 + i * 25 + Math.random() * 40) * 60_000)),
+    ]);
+  }
+  // 到期的排程留言：由留言專用帳號輪流留（同一篇不重複同一人）
+  const cq = (await env.DB.prepare('SELECT * FROM comment_queue WHERE done = 0 AND due_at <= ? ORDER BY due_at LIMIT 6').bind(now()).all<any>()).results;
+  for (const c of cq) {
+    const a = await env.DB.prepare("SELECT id, name, handle, content_group, persona FROM users u WHERE is_content = 1 AND content_group = 'commenter' AND NOT EXISTS (SELECT 1 FROM comments x WHERE x.post_id = ? AND x.user_id = u.id) AND NOT EXISTS (SELECT 1 FROM posts p WHERE p.id = ? AND p.user_id = u.id) ORDER BY COALESCE(last_posted_at, 0) ASC LIMIT 1").bind(c.post_id, c.post_id).first<Account>();
+    await env.DB.prepare('UPDATE comment_queue SET done = 1 WHERE id = ?').bind(c.id).run();
+    if (!a) continue;
+    const exists = await env.DB.prepare('SELECT 1 FROM posts WHERE id = ?').bind(c.post_id).first();
+    if (!exists) continue;
+    await addComment(env, c.post_id, a, c.text, null);
+    await env.DB.prepare('UPDATE users SET last_posted_at = ? WHERE id = ?').bind(now(), a.id).run();
+  }
+  return { posted: due.length, comments: cq.length };
+}
+
+/** 依標題自動加 #標籤（AI 額度用完時，轉貼文就只放標題＋標籤） */
+const AUTO_TAGS: [RegExp, string][] = [[/GTA|俠盜/i, '#GTA6'], [/BTS|防彈/i, '#BTS'], [/BIGBANG/i, '#BIGBANG'], [/G-?DRAGON|權志龍/i, '#GDRAGON'], [/BLACKPINK/i, '#BLACKPINK'], [/NBA/i, '#NBA'], [/MLB|大谷/i, '#MLB'], [/中職|CPBL/i, '#中職'], [/台股|加權/i, '#台股'], [/輝達|NVIDIA|黃仁勳/i, '#輝達'], [/台積電/, '#台積電'], [/選舉|市長|議員|候選人/, '#選舉'], [/AI|人工智慧/, '#AI'], [/地震/, '#地震'], [/颱風/, '#颱風']];
+export function autoTags(title: string, fallback: string) {
+  const tags = AUTO_TAGS.filter(([re]) => re.test(title)).map(([, t]) => t).slice(0, 3);
+  return (tags.length ? tags : [fallback]).join(' ');
 }

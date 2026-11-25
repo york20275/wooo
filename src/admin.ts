@@ -6,12 +6,13 @@ import { runDailyPoll } from './features';
 import { aiImage, assignAvatars, findPhoto } from './photos';
 import { migrate } from './migrate';
 import { serverStats } from './monitor';
+import { newId } from './env';
 import { pingIndexNow } from './indexnow';
 import { runIssuePoll } from './features';
 import { DEFAULT_CHANNELS, fetchVideos } from './videos';
 import { HttpError, deletePost } from './api';
 import { deleteUserData } from './social';
-import { runPostTick, fetchNews, dailyPosts, seedCommenters, shareUrl, pageMeta, purgeGenericComments, runHoroscope, runGamePicks } from './content';
+import { runPostTick, fetchNews, dailyPosts, seedCommenters, shareUrl, pageMeta, purgeGenericComments, runHoroscope, runGamePicks, enqueuePosts } from './content';
 
 export const admin = new Hono<AppEnv>();
 
@@ -356,6 +357,41 @@ admin.post('/migrate', async (c) => c.json({ applied: await migrate(c.env) }));
 admin.post('/content/purge-generic-comments', async (c) => { const r = await purgeGenericComments(c.env); await logAudit(c.env.DB, c.get('user')!.id, 'purge_comments', null, JSON.stringify(r)); return c.json(r); });
 
 admin.post('/indexnow', async (c) => c.json({ status: await pingIndexNow(c.env) }));
+
+/** 排程發文：查看佇列、手動新增、匯入事先寫好的整批文章 */
+admin.get('/content/queue', async (c) => {
+  const db = c.env.DB;
+  const [pending, last, done, next] = await Promise.all([
+    db.prepare('SELECT COUNT(*) AS n FROM post_queue WHERE posted_id IS NULL').first<{ n: number }>(),
+    db.prepare('SELECT MAX(publish_at) AS t FROM post_queue WHERE posted_id IS NULL').first<{ t: number }>(),
+    db.prepare('SELECT COUNT(*) AS n FROM post_queue WHERE posted_id IS NOT NULL').first<{ n: number }>(),
+    db.prepare('SELECT q.id, q.text, q.publish_at, q.board_slug, q.user_id, u.name AS author FROM post_queue q LEFT JOIN users u ON u.id = q.user_id WHERE q.posted_id IS NULL ORDER BY q.publish_at LIMIT 30').all<any>(),
+  ]);
+  return c.json({ pending: pending?.n ?? 0, until: last?.t ?? null, done: done?.n ?? 0, next: next.results });
+});
+admin.post('/content/queue', async (c) => {
+  const b = await c.req.json<any>().catch(() => ({}));
+  const text = String(b.text || '').trim();
+  if (!text) throw new HttpError(400, '請輸入內容');
+  const at = Number(b.publish_at) || 0;
+  if (at < Date.now()) throw new HttpError(400, '發文時間要在未來');
+  const uid = b.as === 'me' ? c.get('user')!.id : null;
+  await c.env.DB.prepare('INSERT INTO post_queue (id, text, board_slug, publish_at, user_id, comments, batch, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(newId(), text.slice(0, 1000), b.board || null, at, uid, '[]', 'manual', Date.now()).run();
+  return c.json({ ok: true });
+});
+admin.delete('/content/queue/:id', async (c) => {
+  await c.env.DB.prepare('DELETE FROM post_queue WHERE id = ? AND posted_id IS NULL').bind(c.req.param('id')).run();
+  return c.json({ ok: true });
+});
+admin.post('/content/queue-import', async (c) => {
+  const b = await c.req.json<any>().catch(() => ({}));
+  const items = (Array.isArray(b.items) ? b.items : []).filter((x: any) => x && typeof x.text === 'string' && x.text.trim());
+  if (!items.length) throw new HttpError(400, '沒有可匯入的文章');
+  const r = await enqueuePosts(c.env, items.slice(0, 300), Math.max(1, Math.min(200, Number(b.per_day) || 30)), String(b.batch || ''));
+  await logAudit(c.env.DB, c.get('user')!.id, 'queue_import', null, `${r.added} 篇`);
+  return c.json(r);
+});
 
 admin.post('/content/game-picks', async (c) => c.json(await runGamePicks(c.env, c.req.query('slot') === 'indie' ? 'indie' : 'studio', true)));
 

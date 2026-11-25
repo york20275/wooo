@@ -3,7 +3,7 @@
 
 async function adminPage(tab) {
   if (!S.me || S.me.role !== 'gm') { shell('', h('main', { class: 'main' }, h('div', { class: 'empty glass' }, '只有 GM 可以使用後台'))); return; }
-  const tabs = [['dashboard', '儀表板'], ['users', '用戶管理'], ['posts', '內容管理'], ['reports', '檢舉處理'], ['appeals', '申訴'], ['boards', '分類版'], ['content', '✦ 內容帳號'], ['news', '新聞來源'], ['server', '伺服器'], ['audit', '操作紀錄']];
+  const tabs = [['dashboard', '儀表板'], ['users', '用戶管理'], ['posts', '內容管理'], ['reports', '檢舉處理'], ['appeals', '申訴'], ['boards', '分類版'], ['content', '✦ 內容帳號'], ['queue', '排程發文'], ['news', '新聞來源'], ['server', '伺服器'], ['audit', '操作紀錄']];
   const nav = h('nav', { 'aria-label': '後台選單' },
     h('a', { href: '/', style: 'margin-bottom:12px' }, '← 回到網站'),
     tabs.map(([k, l]) => h('a', { href: k === 'dashboard' ? '/admin' : `/admin/${k}`, class: tab === k ? 'active' : '' }, l)));
@@ -66,6 +66,32 @@ function meter(label, value, limit, fmtV = (x) => x.toLocaleString()) {
 }
 
 const ADMIN = {
+  async queue(main) {
+    const [d, bd] = await Promise.all([api('GET', '/api/admin/content/queue'), api('GET', '/api/communities')]);
+    const boards = bd.communities || bd;
+    const text = h('textarea', { rows: '4', maxlength: '1000', placeholder: '要排程的內容（可以加 #標籤）', style: 'width:100%' });
+    const when = h('input', { type: 'datetime-local' });
+    const t0 = new Date(Date.now() + 3600_000 + 8 * 3600_000); when.value = t0.toISOString().slice(0, 16);
+    const board = h('select', null, h('option', { value: '' }, '自動（不指定）'), boards.map((b) => h('option', { value: b.slug }, `${b.icon || ''} ${b.name}`)));
+    const as = h('select', null, h('option', { value: 'content' }, '由 ✦ 內容帳號輪流發'), h('option', { value: 'me' }, '用我的帳號發'));
+    const msg = h('span', { class: 'muted' });
+    const add = h('button', { class: 'btn', onclick: async () => {
+      const at = new Date(when.value + ':00+08:00').getTime();
+      try { await api('POST', '/api/admin/content/queue', { text: text.value, publish_at: at, board: board.value, as: as.value }); toast('已排程'); ADMIN.queue(main); } catch (e) { msg.textContent = e.message; }
+    } }, '加入排程');
+    main.replaceChildren(
+      h('h1', null, '排程發文'),
+      h('div', { class: 'stats' },
+        h('div', { class: 'stat glass' }, h('b', null, d.pending), h('span', null, '排程中的文章')),
+        h('div', { class: 'stat glass' }, h('b', null, d.until ? new Date(d.until).toLocaleDateString('zh-TW') : '—'), h('span', null, '已經排到')),
+        h('div', { class: 'stat glass' }, h('b', null, d.done), h('span', null, '已經發出'))),
+      h('section', { class: 'card glass' }, h('h2', null, '新增排程'),
+        text, h('div', { class: 'row wrap' }, h('label', { class: 'field' }, '發文時間（台灣時間）', when), h('label', { class: 'field' }, '分類版', board), h('label', { class: 'field' }, '發文帳號', as)), add, msg),
+      h('section', { class: 'card glass' }, h('h2', null, '接下來要發的'),
+        d.next.length ? h('div', { class: 'stack' }, d.next.map((q) => h('div', { class: 'row between', style: 'gap:10px;padding:8px 0;border-bottom:1px solid rgba(0,0,0,.06)' },
+          h('div', { style: 'min-width:0' }, h('small', { class: 'muted' }, `${new Date(q.publish_at).toLocaleString('zh-TW', { hour12: false })} · ${q.author || '✦ 輪流'}${q.board_slug ? ` · ${q.board_slug}` : ''}`), h('div', { style: 'white-space:pre-wrap' }, q.text.slice(0, 120))),
+          h('button', { class: 'btn ghost small', onclick: async () => { await api('DELETE', `/api/admin/content/queue/${q.id}`); ADMIN.queue(main); } }, '刪除')))) : h('span', { class: 'muted' }, '目前沒有排程的文章')));
+  },
   async server(main) {
     const d = await api('GET', '/api/admin/server');
     const L = d.limits[d.plan];
