@@ -503,8 +503,12 @@ export async function runGamePicks(env: Env, slot: 'studio' | 'indie', force = f
   const model = s.ai_model || env.AI_MODEL;
   const toBack = env.DB.prepare("SELECT 1");
   if (slot === 'indie') {
-    const v = await takeVideo(env, ['game'], ['indie', '獨立', 'Steam', 'demo', '試玩']);
-    return v ? { posted: await postVideo(env, model, a, v, indie ? [{ ...indie, content_group: 'game' }] : boards, toBack) } : { skipped: '沒有可分享的遊戲影片' };
+    const v = await takeVideo(env, ['game'], ['indie', 'Indie', '獨立', 'Steam', 'demo', 'Demo', '試玩', '新作'], /GTA|Grand Theft Auto/i);
+    if (!v) return { skipped: '沒有可分享的遊戲影片' };
+    // 標題看得出是獨立遊戲就放獨立遊戲版，其他放遊戲閒聊
+    const isIndie = /indie|獨立|Steam|demo|試玩/i.test(v.title);
+    const target = isIndie && indie ? [{ ...indie, content_group: 'game' }] : boards;
+    return { posted: await postVideo(env, model, a, v, target, toBack) };
   }
   const idx = Number(s.studio_games_idx || 0) % STUDIO_GAMES.length;
   const g = STUDIO_GAMES[idx];
