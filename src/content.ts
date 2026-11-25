@@ -495,13 +495,22 @@ const STUDIO_GAMES: { title: string; facts: string; url: string; img: string }[]
 export async function runGamePicks(env: Env, slot: 'studio' | 'indie', force = false) {
   const s = await getSettings(env.DB);
   if (!force && (s.game_picks === '0' || s.content_enabled !== '1')) return { skipped: '已關閉' };
-  await env.DB.prepare("INSERT OR IGNORE INTO users (id, name, handle, is_content, content_group, content_enabled, persona, bio, created_at) VALUES ('u_gamepicks', '遊戲推坑小站', 'game_picks', 1, 'gamepicks', 0, '熱愛獨立遊戲和網頁遊戲的推坑帳號，語氣輕鬆、會講重點', '推薦好玩的獨立遊戲與網頁遊戲 🎮 標示【工作室作品】的是合作工作室 N.A.N_TW_STUDIO 的作品', ?)").bind(now()).run();
+  await env.DB.prepare("INSERT OR IGNORE INTO users (id, name, handle, is_content, content_group, content_enabled, persona, bio, created_at) VALUES ('u_gamepicks', '遊戲推坑小站', 'game_picks', 1, 'gamepicks', 0, '熱愛獨立遊戲和網頁遊戲的推坑帳號，語氣輕鬆、會講重點', '推薦各種好玩的遊戲、新作情報與影片 🎮 標示【工作室作品】的是合作工作室 N.A.N_TW_STUDIO 的作品', ?)").bind(now()).run();
   const a = await env.DB.prepare("SELECT id, name, handle, content_group, persona FROM users WHERE id = 'u_gamepicks'").first<Account>();
   if (!a) return { error: '帳號建立失敗' };
   const boards = (await env.DB.prepare('SELECT id, name, description, content_group FROM communities').all<Board>()).results;
   const indie = boards.find((b) => b.name === '獨立遊戲') || boards.find((b) => b.content_group === 'game') || null;
   const model = s.ai_model || env.AI_MODEL;
   const toBack = env.DB.prepare("SELECT 1");
+  if (slot === 'indie' && Math.random() < 0.5) {
+    // 一半轉貼遊戲新聞（巴哈 GNN），一半轉貼遊戲影片
+    const row = await env.DB.prepare("SELECT url, title, source, description FROM news_cache WHERE used = 0 AND url LIKE '%gnn.gamer%' AND title NOT LIKE '%GTA%' ORDER BY fetched_at DESC LIMIT 15").all<NewsItem>();
+    const it = row.results[Math.floor(Math.random() * Math.min(row.results.length, 6))];
+    if (it && (await env.DB.prepare('UPDATE news_cache SET used = 1 WHERE url = ? AND used = 0').bind(it.url).run()).meta.changes) {
+      const game = boards.find((b) => b.content_group === 'game');
+      return { posted: await postShare(env, model, a, it, game ? [game] : boards, toBack) };
+    }
+  }
   if (slot === 'indie') {
     const v = await takeVideo(env, ['game'], ['indie', 'Indie', '獨立', 'Steam', 'demo', 'Demo', '試玩', '新作'], /GTA|Grand Theft Auto/i);
     if (!v) return { skipped: '沒有可分享的遊戲影片' };
@@ -612,10 +621,10 @@ export async function handleCron(env: Env, _cron: string) {
   if (m === 15 || m === 45) await fetchVideos(env, DEFAULT_CHANNELS.filter((_, i) => i % 2 === (m === 15 ? 0 : 1))).catch((e) => console.log('videos', String(e)));
   // 每日投票：台灣時間 10:00 起每 10 分鐘檢查一次（今天發過就跳過）
   if (d.getUTCHours() >= 2 && d.getUTCHours() < 14 && m % 10 === 0) await runDailyPoll(env).catch((e) => console.log('daily poll', String(e)));
-  // 遊戲推坑小站：台灣時間 12:40 介紹工作室作品、20:40 轉貼其他獨立遊戲影片
+  // 遊戲推坑小站：每天 10:40、12:40、16:40、20:40 各一篇；工作室作品三天才一篇（中午），其他都是別人的遊戲
   const twH = (d.getUTCHours() + 8) % 24;
-  if (m === 40 && twH === 12) await runGamePicks(env, 'studio').catch((e) => console.log('gamepicks', String(e)));
-  if (m === 40 && twH === 20) await runGamePicks(env, 'indie').catch((e) => console.log('gamepicks', String(e)));
+  const twDayNo = Math.floor((Date.now() + 8 * 3600_000) / 86400_000);
+  if (m === 40 && [10, 12, 16, 20].includes(twH)) await runGamePicks(env, twH === 12 && twDayNo % 3 === 0 ? 'studio' : 'indie').catch((e) => console.log('gamepicks', String(e)));
   // 星座運勢：台灣時間早上 7:00 起每 10 分鐘檢查一次（UTC 23 點）
   if ((d.getUTCHours() === 23 || d.getUTCHours() === 0) && m % 10 === 2) await runHoroscope(env).catch((e) => console.log('horoscope', String(e)));
   // 議題投票：台灣時間 12:00 起每 10 分鐘檢查一次
