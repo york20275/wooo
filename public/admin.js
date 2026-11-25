@@ -83,7 +83,7 @@ const ADMIN = {
       h('h1', null, '排程發文'),
       h('div', { class: 'stats' },
         h('div', { class: 'stat glass' }, h('b', null, d.pending), h('span', null, '排程中的文章')),
-        h('div', { class: 'stat glass' }, h('b', null, d.until ? new Date(d.until).toLocaleDateString('zh-TW') : '—'), h('span', null, '已經排到')),
+        h('div', { class: 'stat glass' }, h('b', null, d.until ? new Date(d.until).toLocaleDateString('zh-TW') : '—'), h('span', null, '每日文章排到（節日文另計）')),
         h('div', { class: 'stat glass' }, h('b', null, d.done), h('span', null, '已經發出'))),
       h('section', { class: 'card glass' }, h('h2', null, '新增排程'),
         text, h('div', { class: 'row wrap' }, h('label', { class: 'field' }, '發文時間（台灣時間）', when), h('label', { class: 'field' }, '分類版', board), h('label', { class: 'field' }, '發文帳號', as)), add, msg),

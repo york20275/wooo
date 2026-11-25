@@ -686,7 +686,8 @@ function fitHours(t: number, hours?: string) {
 
 /** 把一批文章接在佇列最後面，平均分散到之後的日子（每天 perDay 篇，時間隨機打散） */
 export async function enqueuePosts(env: Env, items: QueueItem[], perDay: number, batch = '') {
-  const last = await env.DB.prepare('SELECT MAX(publish_at) AS t FROM post_queue WHERE posted_id IS NULL').first<{ t: number | null }>();
+  // 接在「依序排的文章」最後面；指定日期的節日文（batch 以 fixed 開頭或 cny）和手動排程的不算
+  const last = await env.DB.prepare("SELECT MAX(publish_at) AS t FROM post_queue WHERE posted_id IS NULL AND COALESCE(batch, '') NOT IN ('cny', 'manual') AND COALESCE(batch, '') NOT LIKE 'fixed%'").first<{ t: number | null }>();
   let t = Math.max(now() + 5 * 60_000, last?.t || 0);
   const gap = 86400_000 / Math.max(1, perDay);
   const stmts: D1PreparedStatement[] = [];
@@ -699,8 +700,7 @@ export async function enqueuePosts(env: Env, items: QueueItem[], perDay: number,
       .bind(newId(), it.text.slice(0, 1000), it.board || null, it.grp || null, it.sensitive ? 1 : 0, JSON.stringify((it.comments || []).slice(0, 6)), it.hours || null, at, batch, now()));
   }
   for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
-  const end = await env.DB.prepare('SELECT MAX(publish_at) AS t FROM post_queue WHERE posted_id IS NULL').first<{ t: number }>();
-  return { added: stmts.length, until: end?.t ?? t };
+  return { added: stmts.length, until: t };
 }
 
 /** 每分鐘：發出到期的排程文章，並把它的留言排在接下來幾小時陸續出現 */

@@ -363,7 +363,7 @@ admin.get('/content/queue', async (c) => {
   const db = c.env.DB;
   const [pending, last, done, next] = await Promise.all([
     db.prepare('SELECT COUNT(*) AS n FROM post_queue WHERE posted_id IS NULL').first<{ n: number }>(),
-    db.prepare('SELECT MAX(publish_at) AS t FROM post_queue WHERE posted_id IS NULL').first<{ t: number }>(),
+    db.prepare("SELECT MAX(publish_at) AS t FROM post_queue WHERE posted_id IS NULL AND COALESCE(batch, '') NOT IN ('cny', 'manual') AND COALESCE(batch, '') NOT LIKE 'fixed%'").first<{ t: number }>(),
     db.prepare('SELECT COUNT(*) AS n FROM post_queue WHERE posted_id IS NOT NULL').first<{ n: number }>(),
     db.prepare('SELECT q.id, q.text, q.publish_at, q.board_slug, q.user_id, u.name AS author FROM post_queue q LEFT JOIN users u ON u.id = q.user_id WHERE q.posted_id IS NULL ORDER BY q.publish_at LIMIT 30').all<any>(),
   ]);
