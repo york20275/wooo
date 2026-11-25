@@ -508,7 +508,7 @@ export async function runGamePicks(env: Env, slot: 'studio' | 'indie', force = f
   }
   const idx = Number(s.studio_games_idx || 0) % STUDIO_GAMES.length;
   const g = STUDIO_GAMES[idx];
-  const prompt = `介紹一款遊戲，像玩家社群裡的推坑文，輕鬆、講重點。
+  const prompt = `用推薦帳號的口吻介紹一款遊戲，輕鬆、講重點，像在跟大家說「這款可以看看」。不要寫成自己玩過的心得（不要用「最近在玩」「我玩了」「真的很好玩」這類說法），也不要替遊戲打分數或說別人評價很好。
 遊戲：${g.title}
 已知資訊（只能用這些，不要編造玩法細節、數字、評價或更新內容）：${g.facts}。
 只輸出 2 到 3 句、40 到 90 個字的介紹，不要標題、不要網址、不要 hashtag。`;
