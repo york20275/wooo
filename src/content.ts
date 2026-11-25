@@ -478,6 +478,57 @@ async function runCommentTick(env: Env, s: Record<string, string>) {
   }
 }
 
+/** 遊戲推坑小站：中立的遊戲推薦帳號，每天兩篇——一篇介紹合作工作室的作品（標明【工作室作品】），一篇轉貼其他獨立遊戲的影片 */
+const STUDIO_GAMES: { title: string; facts: string; url: string; img: string }[] = [
+  { title: '街區學園：勢力崛起', facts: '台灣街頭×賽博龐克的掛機練功 MMO，三大學院爭奪戰、四大職業，支援中英日韓', url: 'https://nanstudiotw.itch.io/neo-academy', img: 'https://img.itch.zone/aW1nLzMyMjMwODI5LmpwZw==/315x250%23c/o%2FqIYZ.jpg' },
+  { title: '人族無敵 II', facts: '魔獸三經典塔防地圖《人族無敵 II》的網頁、手機版', url: 'https://nanstudiotw.itch.io/humans2', img: 'https://img.itch.zone/aW1nLzMxNzcxNDMzLnBuZw==/315x250%23c/YreCjh.png' },
+  { title: '真．三國無雙（魔獸Ⅲ經典地圖）', facts: '魔獸Ⅲ經典地圖《真．三國無雙》的網頁、手機版', url: 'https://nanstudiotw.itch.io/sanguomusou', img: 'https://img.itch.zone/aW1nLzMxNjEyNDM5LmpwZw==/315x250%23c/VFcqiP.jpg' },
+  { title: '誰是殺手 Who Is the Killer?', facts: '隱藏身分的推理對戰遊戲', url: 'https://nanstudiotw.itch.io/who-is-the-killer', img: 'https://img.itch.zone/aW1nLzMxNTkwMzQxLnBuZw==/315x250%23c/F%2Bv8wA.png' },
+  { title: '守女神GX 手機版', facts: '魔獸經典防守圖《守女神GX》手機／網頁版，60 位戰國武將', url: 'https://nanstudiotw.itch.io/gx-defense', img: 'https://img.itch.zone/aW1nLzMxNTI3MjIxLmpwZw==/315x250%23c/e1twba.jpg' },
+  { title: '綠色循環圈外傳TD', facts: '魔獸經典地圖「綠色循環圈外傳」手機版：原始 3D 模型、48 波加熊貓大師、有電腦隊友', url: 'https://nanstudiotw.itch.io/green-circle-td', img: 'https://img.itch.zone/aW1nLzMxNTE0MDA2LmpwZw==/315x250%23c/g%2BV5xW.jpg' },
+  { title: '火影忍者羈絆TD 手機版', facts: '魔獸三經典守城《火影忍者羈絆》手機版：48 位忍者、30 波守城、AI 隊友', url: 'https://nanstudiotw.itch.io/naruto-kizuna-mobile', img: 'https://img.itch.zone/aW1nLzMxNTI3MjQwLnBuZw==/315x250%23c/1B0RjL.png' },
+  { title: '戰國防衛戰 BASARA 手機版', facts: '戰國題材的防守遊戲手機版', url: 'https://nanstudiotw.itch.io/basara-defense', img: 'https://img.itch.zone/aW1nLzMxNTI3MjM1LmpwZw==/315x250%23c/g%2F1%2BAW.jpg' },
+  { title: '台灣爭霸 Taiwan Conquest', facts: '以台灣為舞台的多人線上策略遊戲', url: 'https://nanstudiotw.itch.io/taiwan-conquest', img: 'https://img.itch.zone/aW1nLzMxMzcxMzQ3LmpwZw==/315x250%23c/GpTtqt.jpg' },
+  { title: '信長之野望 手機版', facts: '織田軍對聯合軍，手機上的 5v5 信長 MOBA（Android）', url: 'https://nanstudiotw.itch.io/nobunaga-mobile', img: 'https://img.itch.zone/aW1nLzMxMzA5MjE5LnBuZw==/315x250%23c/K1Ss4N.png' },
+  { title: 'Deadzone City 都市獵殺', facts: '回合制都市大逃殺：搜刮、整裝，跟 20 個 AI 對手拚到最後', url: 'https://nanstudiotw.itch.io/deadzone-city', img: 'https://img.itch.zone/aW1nLzMwNjQ2Mzk4LnBuZw==/315x250%23c/G8yXwc.png' },
+];
+export async function runGamePicks(env: Env, slot: 'studio' | 'indie', force = false) {
+  const s = await getSettings(env.DB);
+  if (!force && (s.game_picks === '0' || s.content_enabled !== '1')) return { skipped: '已關閉' };
+  await env.DB.prepare("INSERT OR IGNORE INTO users (id, name, handle, is_content, content_group, content_enabled, persona, bio, created_at) VALUES ('u_gamepicks', '遊戲推坑小站', 'game_picks', 1, 'gamepicks', 0, '熱愛獨立遊戲和網頁遊戲的推坑帳號，語氣輕鬆、會講重點', '推薦好玩的獨立遊戲與網頁遊戲 🎮 標示【工作室作品】的是合作工作室 N.A.N_TW_STUDIO 的作品', ?)").bind(now()).run();
+  const a = await env.DB.prepare("SELECT id, name, handle, content_group, persona FROM users WHERE id = 'u_gamepicks'").first<Account>();
+  if (!a) return { error: '帳號建立失敗' };
+  const boards = (await env.DB.prepare('SELECT id, name, description, content_group FROM communities').all<Board>()).results;
+  const indie = boards.find((b) => b.name === '獨立遊戲') || boards.find((b) => b.content_group === 'game') || null;
+  const model = s.ai_model || env.AI_MODEL;
+  const toBack = env.DB.prepare("SELECT 1");
+  if (slot === 'indie') {
+    const v = await takeVideo(env, ['game'], ['indie', '獨立', 'Steam', 'demo', '試玩']);
+    return v ? { posted: await postVideo(env, model, a, v, indie ? [{ ...indie, content_group: 'game' }] : boards, toBack) } : { skipped: '沒有可分享的遊戲影片' };
+  }
+  const idx = Number(s.studio_games_idx || 0) % STUDIO_GAMES.length;
+  const g = STUDIO_GAMES[idx];
+  const prompt = `介紹一款遊戲，像玩家社群裡的推坑文，輕鬆、講重點。
+遊戲：${g.title}
+已知資訊（只能用這些，不要編造玩法細節、數字、評價或更新內容）：${g.facts}。
+只輸出 2 到 3 句、40 到 90 個字的介紹，不要標題、不要網址、不要 hashtag。`;
+  const out = await generate(env, BASE_RULES, prompt, 220, model);
+  if (!out || REFUSAL.test(out) || SIMPLIFIED.test(out)) return { error: 'AI 生成失敗' };
+  const intro = await reviewPost(env, model, fixTypos(out.replace(/^["「『]|["」』]$/g, '').replace(/https?:\/\/\S+/g, '').trim()), `遊戲：${g.title}\n已知資訊：${g.facts}`);
+  if (!intro) return { error: '介紹沒通過檢查' };
+  const tagName = g.title.split(' ')[0].replace(/[：:]/g, '');
+  const text = `【工作室作品】${g.title}\n${intro}\n#獨立遊戲 #手機遊戲 #${tagName}`;
+  const id = newId();
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO posts (id, user_id, text, link_url, link_title, link_site, link_image, community_id, source, created_at) VALUES (?, 'u_gamepicks', ?, ?, ?, 'itch.io · NanStudioTw', ?, ?, 'content', ?)")
+      .bind(id, text, g.url, g.title, g.img, indie?.id ?? null, now()),
+    env.DB.prepare("UPDATE users SET last_posted_at = ? WHERE id = 'u_gamepicks'").bind(now()),
+    env.DB.prepare("INSERT INTO settings (key, value) VALUES ('studio_games_idx', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(String(idx + 1)),
+    ...(indie ? [env.DB.prepare('UPDATE communities SET post_count = post_count + 1 WHERE id = ?').bind(indie.id)] : []),
+  ]);
+  return { posted: id, game: g.title };
+}
+
 /** 每日星座運勢：專門的 ✦ 帳號每天早上 7 點發一篇 12 星座運勢（娛樂用） */
 const SIGNS = ['♈ 牡羊座', '♉ 金牛座', '♊ 雙子座', '♋ 巨蟹座', '♌ 獅子座', '♍ 處女座', '♎ 天秤座', '♏ 天蠍座', '♐ 射手座', '♑ 摩羯座', '♒ 水瓶座', '♓ 雙魚座'];
 export async function runHoroscope(env: Env, force = false) {
@@ -557,6 +608,10 @@ export async function handleCron(env: Env, _cron: string) {
   if (m === 15 || m === 45) await fetchVideos(env, DEFAULT_CHANNELS.filter((_, i) => i % 2 === (m === 15 ? 0 : 1))).catch((e) => console.log('videos', String(e)));
   // 每日投票：台灣時間 10:00 起每 10 分鐘檢查一次（今天發過就跳過）
   if (d.getUTCHours() >= 2 && d.getUTCHours() < 14 && m % 10 === 0) await runDailyPoll(env).catch((e) => console.log('daily poll', String(e)));
+  // 遊戲推坑小站：台灣時間 12:40 介紹工作室作品、20:40 轉貼其他獨立遊戲影片
+  const twH = (d.getUTCHours() + 8) % 24;
+  if (m === 40 && twH === 12) await runGamePicks(env, 'studio').catch((e) => console.log('gamepicks', String(e)));
+  if (m === 40 && twH === 20) await runGamePicks(env, 'indie').catch((e) => console.log('gamepicks', String(e)));
   // 星座運勢：台灣時間早上 7:00 起每 10 分鐘檢查一次（UTC 23 點）
   if ((d.getUTCHours() === 23 || d.getUTCHours() === 0) && m % 10 === 2) await runHoroscope(env).catch((e) => console.log('horoscope', String(e)));
   // 議題投票：台灣時間 12:00 起每 10 分鐘檢查一次
