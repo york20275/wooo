@@ -266,8 +266,9 @@ admin.post('/content/run-now', async (c) => {
   return c.json(res);
 });
 admin.post('/content/fetch-news', async (c) => {
-  const n = await fetchNews(c.env);
-  return c.json({ fetched: n });
+  const report: string[] = [];
+  const n = await fetchNews(c.env, report);
+  return c.json({ fetched: n, report });
 });
 
 admin.get('/news', async (c) => {

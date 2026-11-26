@@ -57,7 +57,7 @@ async function fromRss(feed: string): Promise<NewsItem[]> {
 }
 
 /** 從 NewsData.io 與 RSS 抓新聞存進快取，回傳新增筆數 */
-export async function fetchNews(env: Env): Promise<number> {
+export async function fetchNews(env: Env, report?: string[]): Promise<number> {
   const key = (await getSetting(env.DB, 'newsdata_key', '')) || env.NEWSDATA_API_KEY || '';
   let feeds: string[] = [];
   try { feeds = JSON.parse(await getSetting(env.DB, 'rss_feeds', '[]')); } catch {}
@@ -66,7 +66,7 @@ export async function fetchNews(env: Env): Promise<number> {
     try { all.push(...(await fromNewsData(key))); } catch (e) { await logContent(env.DB, 'error', null, `NewsData：${e}`); }
   }
   for (const f of feeds) {
-    try { all.push(...(await fromRss(f))); } catch (e) { await logContent(env.DB, 'error', null, `RSS ${f}：${e}`); }
+    try { const got = await fromRss(f); report?.push(`${f}：${got.length} 則`); all.push(...got); } catch (e) { report?.push(`${f}：${e}`); await logContent(env.DB, 'error', null, `RSS ${f}：${e}`); }
   }
   let added = 0;
   for (const n of all) {
