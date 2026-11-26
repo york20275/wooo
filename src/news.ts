@@ -39,6 +39,20 @@ async function fromRss(feed: string): Promise<NewsItem[]> {
     items.push({ url: link, title, source: src, description: get('description').slice(0, 600) });
     if (items.length >= 20) break;
   }
+  // Atom 格式（例如 PTT 看板的 https://www.ptt.cc/atom/看板.xml）
+  if (!items.length) {
+    for (const m of xml.matchAll(/<entry[\s>][\s\S]*?<\/entry>/g)) {
+      const block = m[0];
+      const get = (tag: string) => { const x = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`)); return x ? strip(x[1]) : ''; };
+      const link = (block.match(/<link[^>]*href="([^"]+)"/) || [])[1] || '';
+      const title = get('title');
+      // PTT：略過回文、公告與置底文
+      if (!link || !title || /^(Re:|Fw:|\[公告\]|\[置底\])/i.test(title)) continue;
+      const src = (() => { try { return new URL(link).hostname; } catch { return ''; } })();
+      items.push({ url: link, title, source: src, description: (get('content') || get('summary')).slice(0, 600) });
+      if (items.length >= 20) break;
+    }
+  }
   return items;
 }
 
