@@ -85,7 +85,8 @@ const REFUSAL = /抱歉|對不起，我|我無法|我不能|無法提供|不適�
 const TW_TERMS: [RegExp, string][] = [[/視頻/g, '影片'], [/質量/g, '品質'], [/信息/g, '訊息'], [/軟件/g, '軟體'], [/硬件/g, '硬體'], [/網絡/g, '網路'], [/屏幕/g, '螢幕'], [/手機殼/g, '手機殼'], [/打印/g, '列印'], [/優化/g, '最佳化'], [/鼠標/g, '滑鼠'], [/出租車/g, '計程車'], [/地鐵/g, '捷運'], [/公交車?/g, '公車'], [/自行車/g, '腳踏車'], [/土豆/g, '馬鈴薯'], [/西紅柿/g, '番茄'], [/早上好/g, '早安'], [/晚上好/g, '晚安'], [/牛逼/g, '超猛'], [/靠譜/g, '可靠'], [/給力/g, '讚'], [/點贊/g, '按讚'], [/博主/g, '版主'], [/網友們/g, '大家'], [/搞定/g, '搞定'], [/小伙伴/g, '朋友'], [/閨蜜/g, '好姊妹'], [/渠道/g, '管道'], [/激活/g, '啟用'], [/默認/g, '預設'], [/數據/g, '資料'], [/程序/g, '程式'], [/攝像頭/g, '鏡頭'], [/服務器/g, '伺服器'], [/U盤/g, '隨身碟'], [/幹嘛呢/g, '在幹嘛'], [/挺好/g, '還不錯'], [/咋/g, '怎麼'], [/冲/g, '衝'], [/想象/g, '想像'], [/幸運色：橙/g, '幸運色：橘'], [/里面/g, '裡面'], [/着/g, '著'], [/于/g, '於']];
 /** 出現簡體字就不用（模型偶爾混簡體） */
 const SIMPLIFIED = /[这们说还个来对时会过没发问题吗让给经么样开关点头见进现实东车门长书买卖电话语认识应该视频网络软]/;
-export function toTaiwan(t: string) { return TW_TERMS.reduce((s, [re, to]) => s.replace(re, to), t); }
+const S2T: Record<string, string> = { 这: '這', 们: '們', 说: '說', 还: '還', 个: '個', 来: '來', 对: '對', 时: '時', 会: '會', 过: '過', 没: '沒', 发: '發', 问: '問', 题: '題', 吗: '嗎', 让: '讓', 给: '給', 经: '經', 样: '樣', 开: '開', 关: '關', 头: '頭', 见: '見', 进: '進', 现: '現', 实: '實', 东: '東', 车: '車', 门: '門', 长: '長', 书: '書', 买: '買', 卖: '賣', 电: '電', 话: '話', 语: '語', 认: '認', 识: '識', 应: '應', 该: '該', 视: '視', 频: '頻', 网: '網', 络: '絡', 软: '軟', 戏: '戲', 场: '場', 战: '戰', 赛: '賽', 欢: '歡', 爱: '愛', 乐: '樂', 选: '選', 择: '擇', 种: '種', 机: '機', 体: '體', 欧: '歐', 华: '華', 丽: '麗', 动: '動', 导: '導', 际: '際', 级: '級', 线: '線', 图: '圖', 听: '聽', 写: '寫', 读: '讀', 学: '學', 觉: '覺', 难: '難' };
+export function toTaiwan(t: string) { return TW_TERMS.reduce((s, [re, to]) => s.replace(re, to), t).replace(/[\u4e00-\u9fff]/g, (ch) => S2T[ch] || ch); }
 
 const TYPOS: [RegExp, string][] = [[/倒楉|倒霉/g, '倒楣'], [/重來沒/g, '從來沒'], [/在也不/g, '再也不'], [/因該/g, '應該'], [/以經/g, '已經'], [/真的假的阿/g, '真的假的啊']];
 function fixTypos(t: string) { return toTaiwan(TYPOS.reduce((s, [re, to]) => s.replace(re, to), t)); }
@@ -105,6 +106,7 @@ ${text}`, 260, model);
   if (!out) return text;
   const r = out.trim().replace(/^["「『]|["」』]$/g, '');
   if (/^NO\b|^「?NO」?$|不合理/i.test(r)) return null;
+  if (SIMPLIFIED.test(r)) return fixTypos(text);
   if ([...r].length < [...text].length * 0.5 || [...r].length > [...text].length * 1.5) return text; // 編輯改太多就用原文
   return fixTypos(r);
 }
@@ -589,7 +591,7 @@ export async function runGamePicks(env: Env, slot: 'studio' | 'indie', force = f
   const intro = await reviewPost(env, model, fixTypos(out.replace(/^["「『]|["」』]$/g, '').replace(/https?:\/\/\S+/g, '').trim()), `遊戲：${g.title}\n已知資訊：${g.facts}`);
   if (!intro) return { error: '介紹沒通過檢查' };
   const tagName = g.title.split(' ')[0].replace(/（.*?）|[：:．・]/g, '');
-  const text = `【工作室作品】${g.title}\n${intro}\n#獨立遊戲 #手機遊戲 #${tagName}`;
+  const text = `【工作室作品】${g.title}\n${toTaiwan(intro)}\n#獨立遊戲 ${g.url.includes('itch.io') ? '#手機遊戲' : '#網頁遊戲 #免費遊戲'} #${tagName}`;
   const id = newId();
   await env.DB.batch([
     env.DB.prepare("INSERT INTO posts (id, user_id, text, link_url, link_title, link_site, link_image, community_id, source, created_at) VALUES (?, 'u_gamepicks', ?, ?, ?, ?, ?, ?, 'content', ?)")
