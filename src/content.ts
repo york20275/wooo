@@ -115,7 +115,7 @@ async function ogImage(url: string): Promise<string | null> {
   } catch { return null; }
 }
 
-const TOPIC_ANGLES = ['問大家一個具體的問題', '分享一個小技巧或新手建議', '吐槽一件小事', '跟朋友一起玩的趣事', '對某則新聞標題的看法', '還在猶豫要不要買、問大家意見', '跟前作或其他作品比較的感覺', '一句話的幹話或玩笑', '看到別人討論後的想法', '工作太忙沒時間玩的抱怨'];
+const TOPIC_ANGLES = ['問大家一個具體的問題', '吐槽一件小事', '跟朋友一起玩的趣事', '對某則新聞標題的看法', '還在猶豫要不要買、問大家意見', '跟前作或其他作品比較的感覺', '一句話的幹話或玩笑', '看到別人討論後的想法', '工作太忙沒時間玩的抱怨'];
 async function writePost(env: Env, model: string, a: Account, news: NewsItem | null, wantPhoto = false, board: Board | null = null, style: Style = 'normal', topic: HotTopic | null = null, headlines: string[] = [], recentTopic: string[] = []): Promise<string | null> {
   const boardLine = board && !news && style !== 'topic' ? `\n這篇發在「${board.name}」分類版（${board.description || board.name}），內容跟這個版有關，但保持你的說話風格。` : '';
   const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。${boardLine}`;
@@ -140,7 +140,7 @@ async function writePost(env: Env, model: string, a: Account, news: NewsItem | n
     // 脆爆紅的手法：日常裡的小觀察、溫馨或好笑的瞬間，看了想按讚分享
     observe: `${when}分享一個你在日常生活中觀察到的小瞬間，15 到 60 個字：路上、捷運、超商、公司、家裡看到的有趣、溫馨或讓人會心一笑的事。要像真的看到的，寫得口語、有畫面，不要說教、不要提真實人名或店名。`,
     topic: `${when}最近大家都在聊「${topic?.name}」。發一則貼文，這次的角度是：${pick(TOPIC_ANGLES)}。15 到 80 個字，可以加 #${(topic?.name || '').replace(/\s+/g, '')}。不要用「終於等到」「終於入手」「買了實體版」「買了數位版」「玩了整整」「趁著週末」這類開頭，開頭要跟下面這些最近的貼文都不一樣：\n${recentTopic.slice(0, 8).map((t) => `- ${t.slice(0, 30)}`).join('\n') || '（無）'}
-具體資訊只能用下面提供的內容與新聞標題，不要捏造名稱、數字、日期、股價或細節；沒提供的就講個人感受、看法或問大家。如果跟股票投資有關，只能聊看法與心情，不能給買賣建議。
+具體資訊只能用下面提供的內容與新聞標題，不要捏造名稱、數字、日期、股價或細節；沒提供的就講個人感受、看法或問大家。如果跟股票投資有關，只能聊看法與心情，不能給買賣建議。不要寫遊戲攻略、技巧或系統機制（除非上面資訊有寫）。
 已知資訊：${topic?.facts || ''}${headlines.length ? `\n最近新聞標題：\n${headlines.slice(0, 6).join('\n')}` : ''}`,
   };
   const photoAsk = wantPhoto ? '\n這篇會配一張用手機隨手拍的照片：寫完貼文後，另起最後一行寫「PHOTO: 」加上 8 到 20 個英文單字，具體描述照片畫面，要跟貼文內容一致（例如貼文說客廳很亂，就寫 messy living room with clothes and empty cups on the sofa）。畫面只能有物品、食物、動物、地點或風景，絕對不能有人、人臉、手或身體，也不要有包裝盒、招牌、書本、螢幕這類會有字的東西。' : '';
