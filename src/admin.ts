@@ -388,6 +388,12 @@ admin.delete('/content/queue-batch/:batch', async (c) => {
   const r = await c.env.DB.prepare('DELETE FROM post_queue WHERE batch = ? AND posted_id IS NULL').bind(c.req.param('batch')).run();
   return c.json({ deleted: r.meta.changes || 0 });
 });
+admin.delete('/content/queue-text', async (c) => {
+  const q = String(c.req.query('q') || '').trim();
+  if (q.length < 4) throw new HttpError(400, '關鍵字至少 4 個字');
+  const r = await c.env.DB.prepare('DELETE FROM post_queue WHERE posted_id IS NULL AND text LIKE ?').bind(`%${q}%`).run();
+  return c.json({ deleted: r.meta.changes || 0 });
+});
 admin.post('/content/queue-import', async (c) => {
   const b = await c.req.json<any>().catch(() => ({}));
   const items = (Array.isArray(b.items) ? b.items : []).filter((x: any) => x && typeof x.text === 'string' && x.text.trim());
