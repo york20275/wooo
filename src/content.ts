@@ -324,7 +324,9 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   const vRatio = Math.max(0, Math.min(60, Number(s.video_ratio ?? 15)));
   if (!news && Math.random() * 100 < vRatio) {
     const groups = a.content_group === 'game' ? ['game'] : a.content_group === 'fun' ? ['ent', 'sports'] : a.content_group === 'mixed' ? ['game', 'tech', 'news', 'finance', 'ent', 'sports', 'world'] : ['news', 'tech', 'finance', 'world', 'sports'];
-    const kws = ['GTA', 'Grand Theft Auto', '俠盜', '黃仁勳', 'Jensen', 'NVIDIA', '輝達', '台股', '股市', '台積電', 'BTS', '防彈', 'G-DRAGON', 'GD', 'BIGBANG', 'BLACKPINK', ...hotTopics(s).map((t) => t.name)];
+    const gta = hotTopics(s).find((t) => /GTA/i.test(t.name));
+    const gtaHot = !!gta && topicRatio(gta) >= Number(gta.ratio || 0) * 0.5;
+    const kws = [...(gtaHot ? ['GTA', 'Grand Theft Auto', '俠盜'] : []), '黃仁勳', 'Jensen', 'NVIDIA', '輝達', '台股', '股市', '台積電', 'BTS', '防彈', 'G-DRAGON', 'GD', 'BIGBANG', 'BLACKPINK', ...hotTopics(s).map((t) => t.name)];
     const v = await takeVideo(env, groups, kws);
     if (v) return postVideo(env, model, a, v, boards, toBack);
   }
