@@ -519,6 +519,25 @@ async function runCommentTick(env: Env, s: Record<string, string>) {
 
 /** 遊戲推坑小站：中立的遊戲推薦帳號，每天兩篇——一篇介紹合作工作室的作品（標明【工作室作品】），一篇轉貼其他獨立遊戲的影片 */
 const STUDIO_GAMES: { title: string; facts: string; url: string; img: string }[] = [
+  // 墨仔專區（nantwstudio.com）
+  { title: '啵啵墨仔 Pop Pop Inkies', facts: '原創萌菌人在台灣街景的格子場地放彩墨球，炸開成十字的墨會把人困住，隊友碰一下能救、敵人碰一下淘汰；20 張地圖、10 個角色，冒險模式、連線 2～8 人對戰、天梯排行榜；支援 Android、PC、網頁；免費遊玩', url: 'https://nantwstudio.com/games/ink-pop-arena', img: 'https://nantwstudio.com/play/ink-pop-arena/cover.jpg' },
+  { title: '墨仔卡丁車 Inky Kart', facts: '3D 卡丁車賽車，有甩尾、集氣、出彎加速；24 條賽道橫跨四季和日夜，比賽賺金幣買車升級，56 款車 8 個車系，可以換彩繪和裝飾；免費遊玩', url: 'https://nantwstudio.com/games/ink-kart', img: 'https://nantwstudio.com/play/ink-kart/cover.jpg' },
+  { title: '墨仔大亂鬥 Ink Brawl', facts: '3D 擂台亂鬥，按住蓄力放開衝出去，把別人撞出越縮越小的擂台；11 種場景各有地形機關，29 隻角色，可以對電腦或在大廳開房跟朋友 8 人亂鬥；免費遊玩', url: 'https://nantwstudio.com/games/ink-brawl', img: 'https://nantwstudio.com/play/ink-brawl/cover.jpg' },
+  { title: '墨仔小學堂 Inky Kids Academy', facts: '給 3～6 歲小朋友的學習遊戲，學注音、數數加減、ABC、顏色形狀和動物；題目全部有語音，答錯不扣分；不用登入、沒有廣告；免費遊玩', url: 'https://nantwstudio.com/games/ink-kids', img: 'https://nantwstudio.com/play/ink-kids/cover.jpg' },
+  { title: '墨仔跳跳 Inky Jump', facts: '踩著雲朵一路往上跳，踩彈簧跳超高、拿氣球往上飛、踩扁墨水怪，天空從白天變星空；有高度排行榜；免費遊玩', url: 'https://nantwstudio.com/games/ink-jump', img: 'https://nantwstudio.com/play/ink-jump/cover.jpg' },
+  { title: '墨仔下樓梯 Inky Down', facts: '經典「下一百層」墨仔版，一直往下跳躲開天花板尖刺，有尖刺樓梯、輸送帶、彈簧、假樓梯，一般和困難兩種模式；免費遊玩', url: 'https://nantwstudio.com/games/ink-stairs', img: 'https://nantwstudio.com/play/ink-stairs/cover.jpg' },
+  { title: '墨仔消消樂 Inky Match', facts: '三消益智，3 隻以上一樣就消掉，4 隻變條紋、L／T 形變炸彈、5 隻變彩虹球；40 關，還有限時 90 秒排行榜；免費遊玩', url: 'https://nantwstudio.com/games/ink-match', img: 'https://nantwstudio.com/play/ink-match/cover.jpg' },
+  { title: '墨仔疊疊樂 Inky Stack', facts: '把形狀不一樣的墨仔疊高高，有真實物理會滑會倒；單人挑戰排行榜，或同一台手機 2～4 人輪流放；免費遊玩', url: 'https://nantwstudio.com/games/ink-stack', img: 'https://nantwstudio.com/play/ink-stack/cover.jpg' },
+  { title: '墨仔羽毛球 Inky Badminton', facts: '站到羽毛球下面自動揮拍，跳起來是殺球、可以吊球；1 對 1 或 2 對 2，對電腦或開線上房間跟朋友打；免費遊玩', url: 'https://nantwstudio.com/games/ink-badminton', img: 'https://nantwstudio.com/play/ink-badminton/cover.jpg' },
+  { title: '墨仔排球 Inky Volley', facts: '沙灘排球墨仔版，用大頭把球頂過網，跳起來頂可以殺球；1 對 1 到 3 對 3，對電腦或線上跟朋友玩；免費遊玩', url: 'https://nantwstudio.com/games/ink-volley', img: 'https://nantwstudio.com/play/ink-volley/cover.jpg' },
+  { title: '墨仔躲避球 Inky Dodgeball', facts: '兩隊各守半場撿球丟人，抓準時機可以接球反扣對方血；被打中 2 次出局，1 對 1 到 4 對 4；免費遊玩', url: 'https://nantwstudio.com/games/ink-dodgeball', img: 'https://nantwstudio.com/play/ink-dodgeball/cover.jpg' },
+  { title: '墨仔雪球大戰 Inky Snowball Fight', facts: '蹲下挖雪做雪球、躲在雪堡後面丟人，被打中 3 次倒下 3 秒後復活；大亂鬥或分兩隊，最多 8 人；免費遊玩', url: 'https://nantwstudio.com/games/ink-snowball', img: 'https://nantwstudio.com/play/ink-snowball/cover.jpg' },
+  { title: '墨仔障礙賽 Inky Dash', facts: '8 隻墨仔一起衝 3D 障礙賽道，有旋轉橫桿、擺錘、移動平台，掉下去從檢查點重來，最先到終點的贏；免費遊玩', url: 'https://nantwstudio.com/games/ink-obby', img: 'https://nantwstudio.com/play/ink-obby/cover.jpg' },
+  { title: '墨仔合作大冒險 Inky Co-op Raid', facts: '1～4 隻墨仔合作擋住 10 波墨汁怪，墨仔自動射擊、你負責走位衝刺，隊友倒下要去救，第 5、10 波有魔王；免費遊玩', url: 'https://nantwstudio.com/games/ink-raid', img: 'https://nantwstudio.com/play/ink-raid/cover.jpg' },
+  { title: '墨仔掉落地板 Inky Floor Fall', facts: '踩過的格子會掉下去，兩層地板，把別人推下去，最後站著的墨仔獲勝；線上 8 人派對對抗；免費遊玩', url: 'https://nantwstudio.com/games/ink-fall', img: 'https://nantwstudio.com/play/ink-fall/cover.jpg' },
+  { title: '墨仔鬼抓人 Inky Tag', facts: '被鬼碰到就變成鬼，逃跑的墨仔要撐到時間結束、鬼要抓光大家；線上 10 人；免費遊玩', url: 'https://nantwstudio.com/games/ink-tag', img: 'https://nantwstudio.com/play/ink-tag/cover.jpg' },
+  { title: '墨仔割草 Inky Survivors', facts: '割草肉鴿生存，墨仔自動攻擊、你走位撿經驗寶石，升級三選一，12 種武器 13 種道具可以進化；單人、帶電腦隊友或線上 4 人；免費遊玩', url: 'https://nantwstudio.com/games/ink-survivors', img: 'https://nantwstudio.com/play/ink-survivors/cover.jpg' },
+  // itch.io
   { title: '街區學園：勢力崛起', facts: '台灣街頭×賽博龐克的掛機練功 MMO，三大學院爭奪戰、四大職業，支援中英日韓', url: 'https://nanstudiotw.itch.io/neo-academy', img: 'https://img.itch.zone/aW1nLzMyMjMwODI5LmpwZw==/315x250%23c/o%2FqIYZ.jpg' },
   { title: '人族無敵 II', facts: '魔獸三經典塔防地圖《人族無敵 II》的網頁、手機版', url: 'https://nanstudiotw.itch.io/humans2', img: 'https://img.itch.zone/aW1nLzMxNzcxNDMzLnBuZw==/315x250%23c/YreCjh.png' },
   { title: '真．三國無雙（魔獸Ⅲ經典地圖）', facts: '魔獸Ⅲ經典地圖《真．三國無雙》的網頁、手機版', url: 'https://nanstudiotw.itch.io/sanguomusou', img: 'https://img.itch.zone/aW1nLzMxNjEyNDM5LmpwZw==/315x250%23c/VFcqiP.jpg' },
@@ -573,8 +592,8 @@ export async function runGamePicks(env: Env, slot: 'studio' | 'indie', force = f
   const text = `【工作室作品】${g.title}\n${intro}\n#獨立遊戲 #手機遊戲 #${tagName}`;
   const id = newId();
   await env.DB.batch([
-    env.DB.prepare("INSERT INTO posts (id, user_id, text, link_url, link_title, link_site, link_image, community_id, source, created_at) VALUES (?, 'u_gamepicks', ?, ?, ?, 'itch.io · NanStudioTw', ?, ?, 'content', ?)")
-      .bind(id, text, g.url, g.title, g.img, indie?.id ?? null, now()),
+    env.DB.prepare("INSERT INTO posts (id, user_id, text, link_url, link_title, link_site, link_image, community_id, source, created_at) VALUES (?, 'u_gamepicks', ?, ?, ?, ?, ?, ?, 'content', ?)")
+      .bind(id, text, g.url, g.title, g.url.includes('itch.io') ? 'itch.io · NanStudioTw' : 'nantwstudio.com', g.img, indie?.id ?? null, now()),
     env.DB.prepare("UPDATE users SET last_posted_at = ? WHERE id = 'u_gamepicks'").bind(now()),
     env.DB.prepare("INSERT INTO settings (key, value) VALUES ('studio_games_idx', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(String(idx + 1)),
     ...(indie ? [env.DB.prepare('UPDATE communities SET post_count = post_count + 1 WHERE id = ?').bind(indie.id)] : []),
@@ -666,7 +685,7 @@ export async function handleCron(env: Env, _cron: string) {
   // 遊戲推坑小站：每天 10:40、12:40、16:40、20:40 各一篇；工作室作品三天才一篇（中午），其他都是別人的遊戲
   const twH = (d.getUTCHours() + 8) % 24;
   const twDayNo = Math.floor((Date.now() + 8 * 3600_000) / 86400_000);
-  if (m === 40 && [10, 12, 16, 20].includes(twH)) await runGamePicks(env, twH === 12 && twDayNo % 3 === 0 ? 'studio' : 'indie').catch((e) => console.log('gamepicks', String(e)));
+  if (m === 40 && [10, 12, 16, 20].includes(twH)) await runGamePicks(env, twH === 12 && twDayNo % 2 === 0 ? 'studio' : 'indie').catch((e) => console.log('gamepicks', String(e)));
   // 星座運勢：台灣時間早上 7:00 起每 10 分鐘檢查一次（UTC 23 點）
   if ((d.getUTCHours() === 23 || d.getUTCHours() === 0) && m % 10 === 2) await runHoroscope(env).catch((e) => console.log('horoscope', String(e)));
   // 議題投票：台灣時間 12:00 起每 10 分鐘檢查一次
