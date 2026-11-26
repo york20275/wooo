@@ -13,6 +13,14 @@ export const DEFAULT_CHANNELS: Channel[] = [
   { id: 'UC5nwNW4KdC0SzrhF9BXEYOQ', name: 'TVBS NEWS', group: 'news' },
   { id: 'UCexpzYDEnfmAvPSfG4xbcjA', name: '公視新聞網', group: 'news' },
   { id: 'UCWLpLjjiDrH8gkOUJmB7DSw', name: '中央社', group: 'news' },
+  // 台灣電視／報社新聞頻道（各種立場都收，政治類轉貼一律中立）
+  { id: 'UC2TuODJhC03pLgd6MpWP0iw', name: '三立新聞', group: 'news' },
+  { id: 'UC2VmWn8dAqkzlQqvy02E1PA', name: '民視新聞網', group: 'news' },
+  { id: 'UC1XijdcUJ-M-uo-ilCODc_A', name: '自由時報 LTN TV', group: 'news' },
+  { id: 'UCmdVfsLHu18lCkKYXSOGUxg', name: '中時新聞網', group: 'news' },
+  { id: 'UCpu3bemTQwAU8PqM4kJdoEQ', name: '中天新聞', group: 'news' },
+  { id: 'UCt9MrtIKdLFOSPpQtpwiUoQ', name: '聯合新聞網 udn', group: 'news' },
+  { id: 'UCl3aKvzB7uC5mTlVEWiCogA', name: 'ETtoday新聞雲', group: 'news' },
   { id: 'UCYIVkruUoN04UjV9pkBTswg', name: '非凡電視', group: 'finance' },
   // GTA 攻略、心得頻道：只收標題跟 GTA 有關的影片
   { id: 'UCuWcjpKbIDAbZfHoru1toFg', name: 'GTA Series Videos', group: 'game', only: /GTA|Grand Theft Auto/i },

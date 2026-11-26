@@ -212,7 +212,7 @@ async function takePolitical(env: Env): Promise<NewsItem | null> {
 /** 轉貼文共用格式：第一行是標題（中文），接一兩句看法，最後 2～4 個 #標籤（方便站內外搜尋） */
 const SHARE_FORMAT = `只輸出下面三行，不要加其他文字：
 標題：（中文標題；原標題是中文就照抄，英文就翻成自然的中文，遊戲、人名等專有名詞可保留英文）
-看法：（1 到 2 句、10 到 50 個字，像台灣網友轉貼時隨手打的反應：驚訝、吐槽、自己的感受、補一句冷知識都可以；大多數時候直接講自己的感覺，偶爾才用問句，不要寫「大家有什麼看法」「大家怎麼看」這種套話）
+看法：（1 到 2 句、15 到 70 個字，像台灣網友轉貼時隨手打的心得或心情：驚訝、吐槽、自己的感受、補一句冷知識都可以；大多數時候直接講自己的感覺，偶爾才用問句，不要寫「大家有什麼看法」「大家怎麼看」這種套話）
 標籤：（2 到 4 個 #標籤，用空格分開，例如 #GTA6 #攻略 或 #BTS #防彈少年團，標籤裡不要有空格）`;
 function parseShare(out: string, fallbackTitle: string) {
   const get = (k: string) => (out.match(new RegExp(`${k}[:：]\\s*(.+)`)) || [])[1]?.trim() || '';
@@ -275,19 +275,20 @@ ${SHARE_FORMAT}`;
 async function postVideo(env: Env, model: string, a: Account, v: Video, boards: Board[], toBack: D1PreparedStatement): Promise<string | null> {
   const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。`;
   const english = !/[\u4e00-\u9fff]/.test(v.title);
+  const politicalV = POLITICAL.test(v.title);
   const prompt = `你要在社群分享一部 YouTube 影片。影片標題：「${v.title}」（頻道：${v.channel}）。
-${english ? '標題是英文，請翻成自然的中文標題（例如「國外大神整理的 GTA6 新手必學技巧」）。' : ''}
+${english ? '標題是英文，請翻成自然的中文標題（例如「國外大神整理的 GTA6 新手必學技巧」）。' : ''}${politicalV ? '這是選舉／政治相關的影片：看法的部分要中立，可以說投票日快到了、競爭很激烈、提醒大家去投票或問大家關心什麼議題，絕對不能支持或反對任何候選人、政黨，也不能嘲諷任何一方。' : '看法可以是自己的心得或心情抒發。'}
 ${SHARE_FORMAT}
 只能根據標題講，不要假裝看過影片細節、不要捏造數字或內容；如果跟股票有關，不要給買賣建議。不要附網址。`;
   const out = await generate(env, system, prompt, 200, model);
   if (!out || REFUSAL.test(out) || SIMPLIFIED.test(out)) return shareTitleOnly(env, a, `https://www.youtube.com/watch?v=${v.id}`, v.title, `YouTube · ${v.channel}`, `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`, ({ ent: '追星娛樂', sports: '運動體壇', finance: '股市財經', world: '國際新聞' } as Record<string, string>)[v.grp] || '', boards, toBack);
   const ps = parseShare(out, v.title);
   if (!ps.say) { await toBack.run(); return null; }
-  const say = await reviewPost(env, model, fixTypos(ps.say), `影片標題：${v.title}`);
+  const say = await reviewPost(env, model, fixTypos(ps.say), `影片標題：${v.title}${politicalV ? '\n（政治影片：看法必須中立，支持或攻擊任何候選人、政黨就回覆 NO）' : ''}`);
   if (!say) { await toBack.run(); return null; }
   const text = `${fixTypos(ps.title)}\n${say}${ps.tags.length ? `\n${ps.tags.join(' ')}` : ''}`;
   const byGrp: Record<string, string> = { ent: '追星娛樂', sports: '運動體壇', finance: '股市財經', world: '國際新聞' };
-  const board = (v.grp === 'game' ? boards.find((b) => b.content_group === 'game') : byGrp[v.grp] ? boards.find((b) => b.name === byGrp[v.grp]) : boards.find((b) => b.content_group === 'news')) || boards.find((b) => b.content_group === 'news') || null;
+  const board = (politicalV ? boards.find((b) => b.name === '政治議題') : v.grp === 'game' ? boards.find((b) => b.content_group === 'game') : byGrp[v.grp] ? boards.find((b) => b.name === byGrp[v.grp]) : boards.find((b) => b.content_group === 'news')) || boards.find((b) => b.content_group === 'news') || null;
   const id = newId();
   const t = now();
   await env.DB.batch([
@@ -317,7 +318,9 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   }
   if (!news && Math.random() * 100 < shareRatio) {
     // 約三成優先挑選舉／政治新聞（各家新聞都會輪到，內容保持中立），讓政治議題版有話題
-    const item = (Math.random() < 0.3 ? await takePolitical(env) : null) || await takeNews(env);
+    // 選前加強：politics_boost_until 之前約六成挑選舉／政治新聞，之後恢復三成
+    const polP = s.politics_boost_until && now() < Date.parse(s.politics_boost_until) ? 0.6 : 0.3;
+    const item = (Math.random() < polP ? await takePolitical(env) : null) || await takeNews(env);
     if (item) return postShare(env, model, a, item, boards, toBack);
   }
   // 分享影片：遊戲帳號分享遊戲影片，時事／綜合帳號分享新聞、科技、財經影片（像脆上大家轉貼影片聊時事）
