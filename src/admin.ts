@@ -226,7 +226,7 @@ admin.patch('/settings', async (c) => {
     if (k === 'video_ratio' && !(Number(val) >= 0 && Number(val) <= 60)) continue;
     if (k === 'cf_plan' && !['free', 'paid'].includes(val)) continue;
     if (k === 'hot_topics') {
-      const list = (Array.isArray(v) ? v : []).slice(0, 10).map((t: any) => ({ name: String(t.name || '').trim().slice(0, 30), facts: String(t.facts || '').slice(0, 1500), ratio: Math.max(0, Math.min(100, Number(t.ratio) || 0)), groups: (Array.isArray(t.groups) ? t.groups : ['game']).filter((g: string) => ['news', 'game', 'mixed', 'fun'].includes(g)), board: ['news', 'ent'].includes(t.board) ? t.board : 'game', keyword: String(t.keyword || '').slice(0, 20) })).filter((t: any) => t.name);
+      const list = (Array.isArray(v) ? v : []).slice(0, 10).map((t: any) => ({ name: String(t.name || '').trim().slice(0, 30), facts: String(t.facts || '').slice(0, 1500), ratio: Math.max(0, Math.min(100, Number(t.ratio) || 0)), groups: (Array.isArray(t.groups) ? t.groups : ['game']).filter((g: string) => ['news', 'game', 'mixed', 'fun'].includes(g)), board: ['news', 'ent'].includes(t.board) ? t.board : 'game', keyword: String(t.keyword || '').slice(0, 20), ...(t.fade_from && Number.isFinite(Date.parse(t.fade_from)) ? { fade_from: String(t.fade_from), fade_days: Math.max(1, Math.min(60, Number(t.fade_days) || 7)) } : {}) })).filter((t: any) => t.name);
       val = JSON.stringify(list);
     }
     if (k === 'community_ratio' && !(Number(val) >= 0 && Number(val) <= 100)) continue;

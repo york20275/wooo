@@ -48,7 +48,16 @@ function chooseBoard(boards: Board[], a: Account, isNews: boolean): Board | null
 }
 
 type Style = 'banter' | 'joke' | 'adult' | 'normal' | 'topic' | 'ask' | 'observe';
-interface HotTopic { name: string; facts: string; ratio: number; groups?: string[]; board?: 'game' | 'news' | 'ent'; keyword?: string }
+interface HotTopic { name: string; facts: string; ratio: number; groups?: string[]; board?: 'game' | 'news' | 'ent'; keyword?: string; fade_from?: string; fade_days?: number }
+
+/** 話題熱度遞減：過了 fade_from 之後，比例在 fade_days 天內慢慢降到原本的 15% */
+function topicRatio(t: HotTopic) {
+  const base = Number(t.ratio || 0);
+  const from = t.fade_from ? Date.parse(t.fade_from) : NaN;
+  if (!Number.isFinite(from) || now() < from) return base;
+  const k = Math.max(0.15, 1 - (now() - from) / ((t.fade_days || 7) * 86400_000));
+  return base * k;
+}
 
 export function hotTopics(s: Record<string, string>): HotTopic[] {
   try { const t = JSON.parse(s.hot_topics || '[]'); return Array.isArray(t) ? t.filter((x) => x && x.name) : []; } catch { return []; }
@@ -58,7 +67,7 @@ export function hotTopics(s: Record<string, string>): HotTopic[] {
 function chooseStyle(s: Record<string, string>, a: Account): { style: Style; topic: HotTopic | null } {
   for (const t of hotTopics(s)) {
     const groups = t.groups && t.groups.length ? t.groups : ['game'];
-    if (groups.includes(a.content_group) && Math.random() * 100 < Number(t.ratio || 0)) return { style: 'topic', topic: t };
+    if (groups.includes(a.content_group) && Math.random() * 100 < topicRatio(t)) return { style: 'topic', topic: t };
   }
   const adult = Math.max(0, Math.min(40, Number(s.adult_ratio ?? 10)));
   const w: [Style, number][] = a.content_group === 'fun'
