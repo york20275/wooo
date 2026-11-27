@@ -426,6 +426,8 @@ admin.post('/content/fetch-videos', async (c) => { const part = Number(c.req.que
 
 admin.get('/content/news-sources', async (c) => c.json((await c.env.DB.prepare("SELECT source, substr(url, 1, instr(substr(url, 9), '/') + 8) AS host, MIN(url) AS sample, COUNT(*) AS n FROM news_cache GROUP BY source, host ORDER BY n DESC").all()).results));
 
+admin.post('/content/news-mark-used', async (c) => { const like = String(c.req.query('like') || ''); if (like.length < 8) throw new HttpError(400, 'like 太短'); const r = await c.env.DB.prepare('UPDATE news_cache SET used = 1 WHERE used = 0 AND url LIKE ?').bind(like).run(); return c.json({ marked: r.meta.changes }); });
+
 admin.get('/server', async (c) => c.json(await serverStats(c.env)));
 
 admin.route('/', modAdmin);
