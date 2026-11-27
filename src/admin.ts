@@ -424,6 +424,8 @@ admin.post('/content/issue-poll', async (c) => c.json(await runIssuePoll(c.env, 
 
 admin.post('/content/fetch-videos', async (c) => { const part = Number(c.req.query('part') ?? 0); const report: string[] = []; const added = await fetchVideos(c.env, DEFAULT_CHANNELS.filter((_, i) => i % 2 === part), report); return c.json({ added, report }); });
 
+admin.get('/content/news-sources', async (c) => c.json((await c.env.DB.prepare("SELECT source, substr(url, 1, instr(substr(url, 9), '/') + 8) AS host, MIN(url) AS sample, COUNT(*) AS n FROM news_cache GROUP BY source, host ORDER BY n DESC").all()).results));
+
 admin.get('/server', async (c) => c.json(await serverStats(c.env)));
 
 admin.route('/', modAdmin);
