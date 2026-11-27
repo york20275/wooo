@@ -12,7 +12,7 @@ import { runIssuePoll } from './features';
 import { DEFAULT_CHANNELS, fetchVideos } from './videos';
 import { HttpError, deletePost } from './api';
 import { deleteUserData } from './social';
-import { runPostTick, fetchNews, dailyPosts, seedCommenters, shareUrl, pageMeta, purgeGenericComments, runHoroscope, runGamePicks, enqueuePosts } from './content';
+import { runPostTick, fetchNews, dailyPosts, seedCommenters, shareUrl, pageMeta, purgeGenericComments, runHoroscope, runGamePicks, runLolNews, enqueuePosts } from './content';
 
 export const admin = new Hono<AppEnv>();
 
@@ -211,7 +211,7 @@ admin.patch('/content/:id', async (c) => {
 });
 
 const EDITABLE = ['content_enabled', 'daily_posts', 'interact_like', 'interact_comment', 'old_posts_mode',
-  'group_news', 'group_game', 'group_mixed', 'group_fun', 'paused_until', 'newsdata_key', 'rss_feeds', 'feed_content_ratio', 'ai_model', 'photo_ratio', 'pexels_key', 'pixabay_key', 'community_ratio', 'daily_poll', 'adult_ratio', 'comment_min', 'comment_max', 'comment_model', 'group_commenter', 'hot_topics', 'cf_plan', 'video_ratio', 'share_ratio', 'issue_poll', 'horoscope', 'game_picks', 'ai_daily_cap', 'politics_boost_until', 'studio_games_idx'];
+  'group_news', 'group_game', 'group_mixed', 'group_fun', 'paused_until', 'newsdata_key', 'rss_feeds', 'feed_content_ratio', 'ai_model', 'photo_ratio', 'pexels_key', 'pixabay_key', 'community_ratio', 'daily_poll', 'adult_ratio', 'comment_min', 'comment_max', 'comment_model', 'group_commenter', 'hot_topics', 'cf_plan', 'video_ratio', 'share_ratio', 'issue_poll', 'horoscope', 'game_picks', 'ai_daily_cap', 'politics_boost_until', 'studio_games_idx', 'lol_news'];
 export const AI_MODELS = ['', '@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct-fp8-fast', '@cf/meta/llama-4-scout-17b-16e-instruct'];
 admin.patch('/settings', async (c) => {
   const b = await c.req.json<Record<string, any>>();
@@ -405,6 +405,8 @@ admin.post('/content/queue-import', async (c) => {
 });
 
 admin.post('/content/game-picks', async (c) => c.json(await runGamePicks(c.env, c.req.query('slot') === 'indie' ? 'indie' : 'studio', true)));
+
+admin.post('/content/lol-news', async (c) => c.json(await runLolNews(c.env, true)));
 
 admin.post('/content/horoscope', async (c) => c.json(await runHoroscope(c.env, true)));
 

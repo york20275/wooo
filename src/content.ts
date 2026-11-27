@@ -603,6 +603,36 @@ export async function runGamePicks(env: Env, slot: 'studio' | 'indie', force = f
   return { posted: id, game: g.title };
 }
 
+
+/** 英雄聯盟電競快報：專門的 ✦ 帳號轉貼 LoL 電競新聞（LCK、LPL、LCP、T1、Faker…）和官方賽事影片 */
+export const LOL_RE = /英雄聯盟|\bLoL\b|League of Legends|LCK|LPL|LCP|LEC|LTA|PCS|Faker|\bT1\b|Gen\.?G|HLE|韓華|BLG|JDG|TES|Bilibili Gaming|英雄聯盟世界賽|\bMSI\b|Worlds 20|CFO|PSG Talon|GAM Esports/i;
+export async function runLolNews(env: Env, force = false) {
+  const s = await getSettings(env.DB);
+  if (!force && (s.lol_news === '0' || s.content_enabled !== '1')) return { skipped: '已關閉' };
+  await env.DB.prepare("INSERT OR IGNORE INTO users (id, name, handle, is_content, content_group, content_enabled, persona, bio, created_at) VALUES ('u_lolnews', '英雄聯盟電競快報', 'lol_esports', 1, 'game', 0, '英雄聯盟電競迷，追 LCK、LPL、LCP 和 T1、Faker，語氣熱血但只講新聞裡有的事', '英雄聯盟電競新聞與賽事影片 🏆 LCK／LPL／LCP／T1／Faker／世界賽', ?)").bind(now()).run();
+  const a = await env.DB.prepare("SELECT id, name, handle, content_group, persona FROM users WHERE id = 'u_lolnews'").first<Account>();
+  if (!a) return { error: '帳號建立失敗' };
+  const boards = (await env.DB.prepare('SELECT id, name, description, content_group FROM communities').all<Board>()).results;
+  const game = boards.find((b) => b.name === '遊戲閒聊') || boards.find((b) => b.content_group === 'game');
+  const target = game ? [{ ...game, content_group: 'game' }] : boards;
+  const model = s.ai_model || env.AI_MODEL;
+  const toBack = env.DB.prepare('SELECT 1');
+  const rows = (await env.DB.prepare('SELECT url, title, source, description FROM news_cache WHERE used = 0 ORDER BY fetched_at DESC LIMIT 400').all<NewsItem>()).results.filter((n) => LOL_RE.test(n.title) && !/GTA/i.test(n.title));
+  // 新聞優先，沒有新聞再分享官方賽事影片
+  if (rows.length && (Math.random() < 0.65 || force)) {
+    const it = rows[Math.floor(Math.random() * Math.min(rows.length, 5))];
+    if ((await env.DB.prepare('UPDATE news_cache SET used = 1 WHERE url = ? AND used = 0').bind(it.url).run()).meta.changes) {
+      const id = await postShare(env, model, a, it, target, toBack);
+      if (id && game) await env.DB.prepare('UPDATE posts SET community_id = ? WHERE id = ?').bind(game.id, id).run();
+      return { posted: id, news: it.title };
+    }
+  }
+  const v = await takeVideo(env, ['lol'], ['T1', 'Faker', 'LCK', 'Worlds', 'MSI', 'Highlights']);
+  if (!v) return { skipped: '目前沒有新的 LoL 新聞或影片', news_left: rows.length };
+  const id = await postVideo(env, model, a, { ...v, grp: 'game' }, target, toBack);
+  return { posted: id, video: v.title };
+}
+
 /** 每日星座運勢：專門的 ✦ 帳號每天早上 7 點發一篇 12 星座運勢（娛樂用） */
 const SIGNS = ['♈ 牡羊座', '♉ 金牛座', '♊ 雙子座', '♋ 巨蟹座', '♌ 獅子座', '♍ 處女座', '♎ 天秤座', '♏ 天蠍座', '♐ 射手座', '♑ 摩羯座', '♒ 水瓶座', '♓ 雙魚座'];
 export async function runHoroscope(env: Env, force = false) {
@@ -688,6 +718,8 @@ export async function handleCron(env: Env, _cron: string) {
   const twH = (d.getUTCHours() + 8) % 24;
   const twDayNo = Math.floor((Date.now() + 8 * 3600_000) / 86400_000);
   if (m === 40 && [10, 12, 16, 20].includes(twH)) await runGamePicks(env, twH === 12 && twDayNo % 2 === 0 ? 'studio' : 'indie').catch((e) => console.log('gamepicks', String(e)));
+  // 英雄聯盟電競快報：每天 9:25、13:25、18:25、22:25 各一篇
+  if (m === 25 && [9, 13, 18, 22].includes(twH)) await runLolNews(env).catch((e) => console.log('lolnews', String(e)));
   // 星座運勢：台灣時間早上 7:00 起每 10 分鐘檢查一次（UTC 23 點）
   if ((d.getUTCHours() === 23 || d.getUTCHours() === 0) && m % 10 === 2) await runHoroscope(env).catch((e) => console.log('horoscope', String(e)));
   // 議題投票：台灣時間 12:00 起每 10 分鐘檢查一次

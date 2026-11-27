@@ -2,7 +2,7 @@ import type { Env } from './env';
 import { now } from './env';
 
 /** ✦ 帳號分享影片用的 YouTube 頻道（官方頻道的公開 RSS，不需要金鑰） */
-export interface Channel { id: string; name: string; group: 'game' | 'tech' | 'news' | 'finance' | 'ent' | 'sports' | 'world'; only?: RegExp }
+export interface Channel { id: string; name: string; group: 'game' | 'tech' | 'news' | 'finance' | 'ent' | 'sports' | 'world' | 'lol'; only?: RegExp }
 export const DEFAULT_CHANNELS: Channel[] = [
   { id: 'UC6VcWc1rAoWdBCM0JxrRQ3A', name: 'Rockstar Games', group: 'game' },
   { id: 'UCKy1dAqELo0zrOtPkf0eTMw', name: 'IGN', group: 'game' },
@@ -22,6 +22,9 @@ export const DEFAULT_CHANNELS: Channel[] = [
   { id: 'UCt9MrtIKdLFOSPpQtpwiUoQ', name: '聯合新聞網 udn', group: 'news' },
   { id: 'UCl3aKvzB7uC5mTlVEWiCogA', name: 'ETtoday新聞雲', group: 'news' },
   { id: 'UCYIVkruUoN04UjV9pkBTswg', name: '非凡電視', group: 'finance' },
+  // 英雄聯盟電競（給「英雄聯盟電競快報」帳號用）
+  { id: 'UCvqRdlKsE5Q8mf8YXbdIJLw', name: 'LoL Esports', group: 'lol' },
+  { id: 'UCw1DsweY9b2AKGjV4kGJP1A', name: 'LCK', group: 'lol' },
   // GTA 攻略、心得頻道：只收標題跟 GTA 有關的影片
   { id: 'UCuWcjpKbIDAbZfHoru1toFg', name: 'GTA Series Videos', group: 'game', only: /GTA|Grand Theft Auto/i },
   { id: 'UCcZ3sRk9z6jjgfYQbMGTpig', name: 'Broughy1322', group: 'game', only: /GTA|Grand Theft Auto/i },
