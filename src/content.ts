@@ -605,7 +605,11 @@ export async function runGamePicks(env: Env, slot: 'studio' | 'indie', force = f
 
 
 /** 英雄聯盟電競快報：專門的 ✦ 帳號轉貼 LoL 電競新聞（LCK、LPL、LCP、T1、Faker…）和官方賽事影片 */
-export const LOL_RE = /英雄聯盟|\bLoL\b|League of Legends|LCK|LPL|LCP|LEC|LTA|PCS|Faker|\bT1\b|Gen\.?G|HLE|韓華|BLG|JDG|TES|Bilibili Gaming|英雄聯盟世界賽|\bMSI\b|Worlds 20|CFO|PSG Talon|GAM Esports/i;
+// 一定是 LoL 的字眼；隊伍縮寫（大小寫要對、前後不能接英文字母）還要配上電競相關字才算
+const LOL_STRONG = /英雄聯盟|League of Legends|Faker|(?<![A-Za-z])(LoL|LCK|LPL|LCP)(?![A-Za-z])/;
+const LOL_TEAM = /(?<![A-Za-z])(T1|Gen\.G|HLE|BLG|JDG|TES|MSI|CFO|GAM|PSG Talon)(?![A-Za-z])/;
+const LOL_CTX = /電競|戰隊|選手|世界賽|季後賽|冠軍|esports|Worlds/i;
+export const isLol = (t: string) => LOL_STRONG.test(t) || (LOL_TEAM.test(t) && LOL_CTX.test(t));
 export async function runLolNews(env: Env, force = false) {
   const s = await getSettings(env.DB);
   if (!force && (s.lol_news === '0' || s.content_enabled !== '1')) return { skipped: '已關閉' };
@@ -617,7 +621,7 @@ export async function runLolNews(env: Env, force = false) {
   const target = game ? [{ ...game, content_group: 'game' }] : boards;
   const model = s.ai_model || env.AI_MODEL;
   const toBack = env.DB.prepare('SELECT 1');
-  const rows = (await env.DB.prepare('SELECT url, title, source, description FROM news_cache WHERE used = 0 ORDER BY fetched_at DESC LIMIT 400').all<NewsItem>()).results.filter((n) => LOL_RE.test(n.title) && !/GTA/i.test(n.title));
+  const rows = (await env.DB.prepare('SELECT url, title, source, description FROM news_cache WHERE used = 0 ORDER BY fetched_at DESC LIMIT 400').all<NewsItem>()).results.filter((n) => isLol(n.title) && !/GTA/i.test(n.title));
   // 新聞優先，沒有新聞再分享官方賽事影片
   if (rows.length && (Math.random() < 0.65 || force)) {
     const it = rows[Math.floor(Math.random() * Math.min(rows.length, 5))];
