@@ -614,6 +614,8 @@ export async function runLolNews(env: Env, force = false) {
   const s = await getSettings(env.DB);
   if (!force && (s.lol_news === '0' || s.content_enabled !== '1')) return { skipped: '已關閉' };
   await env.DB.prepare("INSERT OR IGNORE INTO users (id, name, handle, is_content, content_group, content_enabled, persona, bio, created_at) VALUES ('u_lolnews', '英雄聯盟電競快報', 'lol_esports', 1, 'game', 0, '英雄聯盟電競迷，追 LCK、LPL、LCP 和 T1、Faker，語氣熱血但只講新聞裡有的事', '英雄聯盟電競新聞與賽事影片 🏆 LCK／LPL／LCP／T1／Faker／世界賽', ?)").bind(now()).run();
+  // AI 額度快用完就先不發（不要發只有標題的空文），留到明天
+  if ((await aiBudget(env)).left < 300) return { skipped: '今天 AI 額度不夠' };
   const a = await env.DB.prepare("SELECT id, name, handle, content_group, persona FROM users WHERE id = 'u_lolnews'").first<Account>();
   if (!a) return { error: '帳號建立失敗' };
   const boards = (await env.DB.prepare('SELECT id, name, description, content_group FROM communities').all<Board>()).results;
@@ -722,8 +724,8 @@ export async function handleCron(env: Env, _cron: string) {
   const twH = (d.getUTCHours() + 8) % 24;
   const twDayNo = Math.floor((Date.now() + 8 * 3600_000) / 86400_000);
   if (m === 40 && [10, 12, 16, 20].includes(twH)) await runGamePicks(env, twH === 12 && twDayNo % 2 === 0 ? 'studio' : 'indie').catch((e) => console.log('gamepicks', String(e)));
-  // 英雄聯盟電競快報：每天 9:25、13:25、18:25、22:25 各一篇
-  if (m === 25 && [9, 13, 18, 22].includes(twH)) await runLolNews(env).catch((e) => console.log('lolnews', String(e)));
+  // 英雄聯盟電競快報：每天 9:25、11:25、13:25、15:25 各一篇（AI 額度每天早上 8 點重置，排早一點比較不會被用完）
+  if (m === 25 && [9, 11, 13, 15].includes(twH)) await runLolNews(env).catch((e) => console.log('lolnews', String(e)));
   // 星座運勢：台灣時間早上 7:00 起每 10 分鐘檢查一次（UTC 23 點）
   if ((d.getUTCHours() === 23 || d.getUTCHours() === 0) && m % 10 === 2) await runHoroscope(env).catch((e) => console.log('horoscope', String(e)));
   // 議題投票：台灣時間 12:00 起每 10 分鐘檢查一次
