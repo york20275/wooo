@@ -8,6 +8,7 @@ import { cleanupStories, runDailyPoll, runIssuePoll } from './features';
 import { migrate } from './migrate';
 import { pingIndexNow } from './indexnow';
 import { DEFAULT_CHANNELS, fetchVideos, takeVideo, type Video } from './videos';
+import { SEED_BATCHES } from './seedqueue';
 
 export const fetchNews = fetchNewsImpl;
 export const GROUPS = ['news', 'game', 'mixed', 'fun'] as const;
@@ -240,8 +241,12 @@ async function shareTitleOnly(env: Env, a: Account, url: string, title: string, 
 }
 
 /** 分享一篇網路文章：只根據標題與摘要講一兩句看法，附原文連結（不複製文章內容） */
+/** 投票日（台灣時間 11/28 投票結束 16:00 前）不轉貼選舉／政治新聞，避免投票日還在發競選相關內容 */
+const QUIET = [Date.parse('2026-11-27T16:00:00Z'), Date.parse('2026-11-28T08:00:00Z')];
+const electionQuiet = () => now() >= QUIET[0] && now() < QUIET[1];
 async function postShare(env: Env, model: string, a: Account, item: NewsItem, boards: Board[], toBack: D1PreparedStatement): Promise<string | null> {
   const political = POLITICAL.test(item.title + (item.description || ''));
+  if (political && electionQuiet()) { await toBack.run(); return null; }
   const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。`;
   const rule = political
     ? '這是選舉／政治相關的新聞。保持中立：可以點出新聞重點、問大家怎麼看或關心哪些議題，絕對不能支持或反對任何候選人、政黨，不能叫人投給誰或不要投給誰，也不能嘲諷任何一方。'
@@ -278,6 +283,7 @@ async function postVideo(env: Env, model: string, a: Account, v: Video, boards: 
   const system = `${BASE_RULES}\n你的帳號名稱是「${a.name}」，主題與個性：${a.persona}。`;
   const english = !/[\u4e00-\u9fff]/.test(v.title);
   const politicalV = POLITICAL.test(v.title);
+  if (politicalV && electionQuiet()) { await toBack.run(); return null; }
   const prompt = `你要在社群分享一部 YouTube 影片。影片標題：「${v.title}」（頻道：${v.channel}）。
 ${english ? '標題是英文，請翻成自然的中文標題（例如「國外大神整理的 GTA6 新手必學技巧」）。' : ''}${politicalV ? '這是選舉／政治相關的影片：看法的部分要中立，可以說投票日快到了、競爭很激烈、提醒大家去投票或問大家關心什麼議題，絕對不能支持或反對任何候選人、政黨，也不能嘲諷任何一方。' : '看法可以是自己的心得或心情抒發。'}
 ${SHARE_FORMAT}
@@ -321,7 +327,7 @@ async function postOne(env: Env, model: string, a: Account, photoRatio: number, 
   if (!news && Math.random() * 100 < shareRatio) {
     // 約三成優先挑選舉／政治新聞（各家新聞都會輪到，內容保持中立），讓政治議題版有話題
     // 選前加強：politics_boost_until 之前約六成挑選舉／政治新聞，之後恢復三成
-    const polP = s.politics_boost_until && now() < Date.parse(s.politics_boost_until) ? 0.6 : 0.3;
+    const polP = electionQuiet() ? 0 : s.politics_boost_until && now() < Date.parse(s.politics_boost_until) ? 0.6 : 0.3;
     const item = (Math.random() < polP ? await takePolitical(env) : null) || await takeNews(env);
     if (item) return postShare(env, model, a, item, boards, toBack);
   }
@@ -714,6 +720,13 @@ export async function handleCron(env: Env, _cron: string) {
   const m = d.getUTCMinutes();
   if (m === 0 || m === 30) await fetchNewsImpl(env).catch(() => {});
   await runQueue(env).catch((e) => console.log('queue', String(e)));
+  if (m % 10 === 7) {
+    for (const sb of SEED_BATCHES) {
+      // 先佔位再匯入，避免重複
+      const r = await env.DB.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)").bind(`seeded_${sb.batch}`, String(now())).run();
+      if (r.meta.changes) await enqueuePosts(env, sb.items, sb.perDay, sb.batch).catch((e) => console.log('seed', String(e)));
+    }
+  }
   // 每 30 分鐘通知搜尋引擎（IndexNow）收錄新文章
   if (m === 20 || m === 50) await pingIndexNow(env).catch((e) => console.log('indexnow', String(e)));
   // 頻道分兩批抓（免費方案每次最多 50 個對外請求）
@@ -729,7 +742,7 @@ export async function handleCron(env: Env, _cron: string) {
   // 星座運勢：台灣時間早上 7:00 起每 10 分鐘檢查一次（UTC 23 點）
   if ((d.getUTCHours() === 23 || d.getUTCHours() === 0) && m % 10 === 2) await runHoroscope(env).catch((e) => console.log('horoscope', String(e)));
   // 議題投票：台灣時間 12:00 起每 10 分鐘檢查一次
-  if (d.getUTCHours() >= 4 && d.getUTCHours() < 14 && m % 10 === 5) await runIssuePoll(env).catch((e) => console.log('issue poll', String(e)));
+  if (d.getUTCHours() >= 4 && d.getUTCHours() < 14 && m % 10 === 5 && !electionQuiet()) await runIssuePoll(env).catch((e) => console.log('issue poll', String(e)));
   if (m % 10 === 3) await cleanupStories(env).catch((e) => console.log('stories cleanup', String(e)));
   if (m === 5) {
     // 清理：兩天前的訪客紀錄、過期的登入、90 天前的每日活躍、30 天前的內容紀錄
